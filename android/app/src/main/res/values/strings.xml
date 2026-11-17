@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CueUI</string>
+    <string name="accessibility_service_label">CueUI Phone Automation</string>
+    <string name="accessibility_service_description">Lets CueUI inspect visible on-screen elements and perform local taps, typing, scrolling, and navigation cleanly on your device.</string>
+    <string name="notification_listener_label">CueUI Notification Reader</string>
+</resources>
