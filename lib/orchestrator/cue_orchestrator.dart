@@ -49,12 +49,20 @@ class _WhatsAppRecipientPrompt extends _PendingConversation {
     this.recipient,
     this.message,
     this.names,
-    this.remainingPlan,
-  );
+    this.remainingPlan, {
+    this.retryCall,
+  });
   final String recipient;
   final String message;
   final List<String> names;
   final List<PlannedToolCall> remainingPlan;
+  final PlannedToolCall? retryCall;
+  PlannedToolCall get call =>
+      retryCall ??
+      PlannedToolCall(
+        tool: 'whatsapp_send',
+        args: {'recipient': recipient, 'message': message},
+      );
 
   List<String> get choices => [
     for (var i = 0; i < names.length; i++) '${i + 1}. ${names[i]}',
@@ -71,6 +79,16 @@ class _GrantPermissionPrompt extends _PendingConversation {
   final String originalGoal;
   final String permissionKey;
   final String permissionLabel;
+}
+
+class _RecipientNamePrompt extends _PendingConversation {
+  _RecipientNamePrompt(this.call);
+  final PlannedToolCall call;
+}
+
+class _EditedMessagePrompt extends _PendingConversation {
+  _EditedMessagePrompt(this.call);
+  final PlannedToolCall call;
 }
 
 class CueOrchestrator extends ChangeNotifier {
@@ -94,6 +112,102 @@ class CueOrchestrator extends ChangeNotifier {
   _InstallAppOffer? _lastMissingAppOffer;
   int _activeRunToken = 0;
   String _currentGoal = '';
+  String? _lastRecipient;
+  PlannedToolCall? _lastWhatsAppCall;
+  _WhatsAppRecipientPrompt? _lastRecipientChoices;
+
+  Future<void> submitTool(PlannedToolCall call, String label) async {
+    final token = ++_activeRunToken;
+    resolveConfirmation(false);
+    clearConversationState();
+    _currentGoal = label;
+    _appendMessage(ChatRole.user, label);
+    _emitState(_state.copyWith(isRunning: true, statusLine: 'Working…'));
+    try {
+      await _executePlan([call], token);
+    } catch (error) {
+      if (token == _activeRunToken) {
+        _replyFinal('Could not complete that action: $error');
+      }
+    } finally {
+      if (token == _activeRunToken) {
+        _emitState(_state.copyWith(isRunning: false, statusLine: 'Ready'));
+      }
+    }
+  }
+
+  bool _handleContext(String goal) {
+    final change = RegExp(
+      r'^(?:change|edit) (?:that|it|the message) to (.+)$',
+      caseSensitive: false,
+    ).firstMatch(goal.trim());
+    if (change != null) {
+      final pending = _pendingConversation;
+      final previous = pending is _WhatsAppRecipientPrompt
+          ? pending.call
+          : _lastWhatsAppCall;
+      if (previous == null || previous.tool != 'whatsapp_send') {
+        _replyFinal(
+          'Start a WhatsApp text message first so I know what to edit.',
+        );
+        return true;
+      }
+      final edited = PlannedToolCall(
+        tool: previous.tool,
+        args: {...previous.args, 'message': change.group(1)!},
+      );
+      if (pending is _WhatsAppRecipientPrompt) {
+        final next = _WhatsAppRecipientPrompt(
+          pending.recipient,
+          change.group(1)!,
+          pending.names,
+          pending.remainingPlan,
+          retryCall: edited,
+        );
+        _pendingConversation = next;
+        _replyConversational(
+          'Message changed to "${change.group(1)}". Which recipient?',
+          next.choices,
+        );
+      } else {
+        _pendingConversation = _EditedMessagePrompt(edited);
+        _replyConversational(
+          'New message: "${change.group(1)}" to ${_lastRecipient ?? edited.args['recipient']}. An earlier message may already have been sent. Send this new one?',
+          const ['Send', 'Cancel'],
+        );
+      }
+      return true;
+    }
+    if (RegExp(
+      r'^(?:use|choose|send (?:it )?to) (?:the )?other(?: .+)?$',
+      caseSensitive: false,
+    ).hasMatch(goal.trim())) {
+      final previous = _lastRecipientChoices;
+      if (previous == null) {
+        _replyFinal(
+          'I do not have another matching recipient in this conversation. Give me their full name.',
+        );
+        return true;
+      }
+      final names = previous.names
+          .where((name) => name.toLowerCase() != _lastRecipient?.toLowerCase())
+          .toList();
+      final pending = _WhatsAppRecipientPrompt(
+        previous.recipient,
+        previous.message,
+        names.isEmpty ? previous.names : names,
+        const [],
+        retryCall: previous.call,
+      );
+      _pendingConversation = pending;
+      _replyConversational(
+        'Choose the other recipient. Any previously sent message stays sent.',
+        pending.choices,
+      );
+      return true;
+    }
+    return false;
+  }
 
   static const _yesPhrases = {
     'yes',
@@ -272,6 +386,7 @@ class CueOrchestrator extends ChangeNotifier {
     );
 
     try {
+      if (_handleContext(goal)) return;
       final pending = _pendingConversation;
       if (pending != null &&
           await _handlePendingConversation(pending, goal, runToken)) {
@@ -349,6 +464,10 @@ class CueOrchestrator extends ChangeNotifier {
         "I didn't recognize that command. Try 'call Mom', 'open WhatsApp and message Ali saying hi', "
         "'play lofi on YouTube', 'install Spotify', 'take a photo', 'open calendar', 'what's the weather', or 'hot news'.$aiHint",
       );
+    } catch (error) {
+      if (runToken == _activeRunToken) {
+        _replyFinal('Could not complete that action: $error');
+      }
     } finally {
       if (runToken == _activeRunToken) {
         _emitState(_state.copyWith(isRunning: false, statusLine: 'Ready'));
@@ -415,14 +534,42 @@ class CueOrchestrator extends ChangeNotifier {
     }
 
     switch (pending) {
+      case _RecipientNamePrompt():
+        if (_looksLikeNewCommand(userReply)) {
+          clearConversationState();
+          return false;
+        }
+        clearConversationState();
+        await _executePlan([
+          PlannedToolCall(
+            tool: pending.call.tool,
+            args: {...pending.call.args, 'recipient': userReply.trim()},
+          ),
+        ], runToken);
+        return true;
+      case _EditedMessagePrompt():
+        if (_yesPhrases.contains(normalized) || normalized == 'send') {
+          clearConversationState();
+          await _executePlan([pending.call], runToken);
+          return true;
+        }
+        if (_looksLikeNewCommand(userReply)) {
+          clearConversationState();
+          return false;
+        }
+        _replyConversational('Send the edited message, or cancel?', const [
+          'Send',
+          'Cancel',
+        ]);
+        return true;
       case _WhatsAppRecipientPrompt():
         final phone = WhatsAppAutomator.extractRawPhoneDigits(userReply);
         if (phone != null) {
           clearConversationState();
           await _executePlan([
             PlannedToolCall(
-              tool: 'whatsapp_send',
-              args: {'recipient': userReply.trim(), 'message': pending.message},
+              tool: pending.call.tool,
+              args: {...pending.call.args, 'recipient': userReply.trim()},
             ),
             ...pending.remainingPlan,
           ], runToken);
@@ -459,10 +606,10 @@ class CueOrchestrator extends ChangeNotifier {
           clearConversationState();
           await _executePlan([
             PlannedToolCall(
-              tool: 'whatsapp_send',
+              tool: pending.call.tool,
               args: {
+                ...pending.call.args,
                 'recipient': pending.recipient,
-                'message': pending.message,
                 'selectedChat': selected,
               },
             ),
@@ -636,11 +783,6 @@ class CueOrchestrator extends ChangeNotifier {
           _replyFinal('Okay, cancelled the WhatsApp message.');
           return true;
         }
-        if (OfflineIntentRouter.route(userReply) != null ||
-            _looksLikeNewCommand(userReply)) {
-          clearConversationState();
-          return false;
-        }
         clearConversationState();
         var msg = userReply.trim();
         if (msg.length >= 2 &&
@@ -773,7 +915,27 @@ class CueOrchestrator extends ChangeNotifier {
     ToolExecutionResult? lastResult;
     for (var i = 0; i < plan.length; i++) {
       if (runToken != _activeRunToken) return;
-      final step = plan[i];
+      var step = plan[i];
+      if (step.tool.startsWith('whatsapp_') &&
+          {
+            'him',
+            'her',
+            'them',
+            'that person',
+          }.contains('${step.args['recipient']}'.toLowerCase())) {
+        if (_lastRecipient == null) {
+          _pendingConversation = _RecipientNamePrompt(step);
+          _replyConversational(
+            'Who should receive it? Give me their name.',
+            const ['Cancel'],
+          );
+          return;
+        }
+        step = PlannedToolCall(
+          tool: step.tool,
+          args: {...step.args, 'recipient': _lastRecipient},
+        );
+      }
       _emitState(
         _state.copyWith(
           statusLine: 'Running ${step.tool} (${i + 1}/${plan.length})...',
@@ -784,6 +946,30 @@ class CueOrchestrator extends ChangeNotifier {
         canContinue: () => runToken == _activeRunToken,
       );
       if (runToken != _activeRunToken) return;
+      if (res.ok &&
+          step.tool.startsWith('whatsapp_') &&
+          step.args['recipient'] != null) {
+        _lastRecipient =
+            (res.data['recipient'] ??
+                    step.args['selectedChat'] ??
+                    step.args['recipient'])
+                .toString();
+        _lastWhatsAppCall = step;
+        if (_lastRecipientChoices != null &&
+            step.tool == _lastRecipientChoices!.call.tool) {
+          final old = _lastRecipientChoices!;
+          _lastRecipientChoices = _WhatsAppRecipientPrompt(
+            old.recipient,
+            '${step.args['message'] ?? old.message}',
+            old.names,
+            const [],
+            retryCall: PlannedToolCall(
+              tool: step.tool,
+              args: {...step.args, 'recipient': old.recipient},
+            ),
+          );
+        }
+      }
       _appendMessage(
         res.ok ? ChatRole.tool : ChatRole.error,
         '${step.tool}: ${res.summary}',
@@ -825,7 +1011,16 @@ class CueOrchestrator extends ChangeNotifier {
         result.data['message'].toString(),
         recipients.map((name) => name.toString()).toList(),
         remainingPlan,
+        retryCall: result.data['retryTool'] != null
+            ? PlannedToolCall(
+                tool: result.data['retryTool'].toString(),
+                args: Map<String, dynamic>.from(
+                  result.data['retryArgs'] as Map,
+                ),
+              )
+            : null,
       );
+      _lastRecipientChoices = pending;
       _pendingConversation = pending;
       _replyConversational(
         '${result.summary}\n${pending.choices.take(pending.names.length).join('\n')}',

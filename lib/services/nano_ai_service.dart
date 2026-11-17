@@ -9,10 +9,8 @@ import '../models/cue_models.dart';
 import 'native_bridge.dart';
 
 class NanoAiService extends ChangeNotifier {
-  NanoAiService({
-    required this.nativeApi,
-    http.Client? httpClient,
-  }) : _httpClient = httpClient ?? http.Client();
+  NanoAiService({required this.nativeApi, http.Client? httpClient})
+    : _httpClient = httpClient ?? http.Client();
 
   final CueNativeApi nativeApi;
   final http.Client _httpClient;
@@ -29,7 +27,8 @@ class NanoAiService extends ChangeNotifier {
       title: 'SmolLM2 360M Instruct (Nano)',
       subtitle: 'Smallest & fastest offline NL query parser (~258 MB Q4_K_M).',
       fileName: 'SmolLM2-360M-Instruct-Q4_K_M.gguf',
-      downloadUrl: 'https://huggingface.co/unsloth/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf',
+      downloadUrl:
+          'https://huggingface.co/unsloth/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf',
       sizeMb: 258,
       recommended: true,
     ),
@@ -38,7 +37,8 @@ class NanoAiService extends ChangeNotifier {
       title: 'Qwen 2.5 0.5B Instruct (Q4_K_M)',
       subtitle: 'Strong multi-language intent & slot accuracy (~379 MB).',
       fileName: 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf',
-      downloadUrl: 'https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf',
       sizeMb: 379,
     ),
     AiCatalogEntry(
@@ -46,7 +46,8 @@ class NanoAiService extends ChangeNotifier {
       title: 'Qwen 3 0.6B (Q4_K_M)',
       subtitle: 'Compact Qwen3 model with no-think JSON mode (~378 MB).',
       fileName: 'Qwen3-0.6B-Q4_K_M.gguf',
-      downloadUrl: 'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf',
+      downloadUrl:
+          'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf',
       sizeMb: 378,
     ),
   ];
@@ -82,6 +83,23 @@ class NanoAiService extends ChangeNotifier {
           'read_notifications',
           'reply_notification',
           'get_device_status',
+          'record_audio_start',
+          'record_audio_pause',
+          'record_audio_resume',
+          'record_audio_stop',
+          'camera_photo',
+          'camera_switch',
+          'camera_video_start',
+          'camera_video_stop',
+          'camera_cancel',
+          'whatsapp_share_media',
+          'whatsapp_start_voice',
+          'whatsapp_finish_voice',
+          'whatsapp_cancel_voice',
+          'media_play',
+          'media_stop_playback',
+          'media_transcribe',
+          'run_routine',
           'none',
         ],
       },
@@ -94,6 +112,11 @@ class NanoAiService extends ChangeNotifier {
       'seconds': {'type': 'integer'},
       'percent': {'type': 'integer'},
       'dayOffset': {'type': 'integer'},
+      'countdown': {'type': 'integer'},
+      'lens': {
+        'type': 'string',
+        'enum': ['front', 'back'],
+      },
     },
     'required': ['tool'],
     'additionalProperties': false,
@@ -124,6 +147,13 @@ class NanoAiService extends ChangeNotifier {
       '- media_control: (query=play_pause|next|previous|volume_up|volume_down|mute)\n'
       '- read_messages / read_notifications / get_device_status\n'
       '- reply_notification: reply to incoming notif (target=sender, message=reply)\n'
+      '- record_audio_start / record_audio_pause / record_audio_resume / record_audio_stop: audio recording (message=title)\n'
+      '- camera_photo: capture a photo (lens=front|back, countdown=seconds); camera_switch: lens=front|back\n'
+      '- camera_video_start / camera_video_stop / camera_cancel: video recording or cancel photo countdown\n'
+      '- whatsapp_share_media: send saved file (target=recipient, query=photo|audio|video or empty for latest)\n'
+      '- whatsapp_start_voice: actual WhatsApp voice message (target=recipient); whatsapp_finish_voice / whatsapp_cancel_voice\n'
+      '- media_play / media_transcribe: saved recording (query=title or empty for latest); media_stop_playback\n'
+      '- run_routine: (target=bedtime|morning|focus or custom routine name)\n'
       '- none: if unclear.';
 
   Future<Directory> _modelsDir() async {
@@ -153,7 +183,9 @@ class NanoAiService extends ChangeNotifier {
         if (!await file.exists()) return;
         final len = await file.length();
         if (len < 1000000) return;
-        final name = file.uri.pathSegments.isNotEmpty ? file.uri.pathSegments.last : file.path;
+        final name = file.uri.pathSegments.isNotEmpty
+            ? file.uri.pathSegments.last
+            : file.path;
         results[file.path] = DiscoveredModelFile(
           name: name,
           path: file.path,
@@ -177,7 +209,8 @@ class NanoAiService extends ChangeNotifier {
       }
     } catch (_) {}
 
-    final list = results.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+    final list = results.values.toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
     _updateSnapshot(
       AiEngineSnapshot(
         status: _snapshot.status,
@@ -209,7 +242,8 @@ class NanoAiService extends ChangeNotifier {
       _updateSnapshot(
         AiEngineSnapshot(
           status: AiModelStatus.unloaded,
-          statusMessage: 'No Nano GGUF found yet — download SmolLM2 360M or Qwen 0.5B in AI tab for offline NLU.',
+          statusMessage:
+              'No Nano GGUF found yet — download SmolLM2 360M or Qwen 0.5B in AI tab for offline NLU.',
           discoveredFiles: files,
         ),
       );
@@ -261,7 +295,7 @@ class NanoAiService extends ChangeNotifier {
       final engine = await LlamaEngine.load(
         LlamaModel(ModelSource.path(path, format: ModelFormat.gguf)),
         params: const ModelParams(
-          contextSize: 1024,
+          contextSize: 2048,
           device: ComputeDevice.cpu,
           gpuLayers: 0,
           numberOfThreads: 4,
@@ -347,7 +381,8 @@ class NanoAiService extends ChangeNotifier {
               status: AiModelStatus.downloading,
               downloadingId: entry.id,
               downloadProgress: frac,
-              statusMessage: 'Downloading ${entry.fileName} · $mb / ${entry.sizeMb} MB ($pct%)',
+              statusMessage:
+                  'Downloading ${entry.fileName} · $mb / ${entry.sizeMb} MB ($pct%)',
               discoveredFiles: _snapshot.discoveredFiles,
             ),
           );
@@ -416,18 +451,18 @@ class NanoAiService extends ChangeNotifier {
         if (inString) {
           if (escaped) {
             escaped = false;
-          } else if (code == 0x5C /* \ */) {
+          } else if (code == 0x5C /* \ */ ) {
             escaped = true;
-          } else if (code == 0x22 /* " */) {
+          } else if (code == 0x22 /* " */ ) {
             inString = false;
           }
           continue;
         }
-        if (code == 0x22 /* " */) {
+        if (code == 0x22 /* " */ ) {
           inString = true;
-        } else if (code == 0x7B /* { */) {
+        } else if (code == 0x7B /* { */ ) {
           depth++;
-        } else if (code == 0x7D /* } */) {
+        } else if (code == 0x7D /* } */ ) {
           depth--;
           if (depth == 0) {
             matchedEnd = i;
@@ -459,7 +494,10 @@ class NanoAiService extends ChangeNotifier {
     final sw = Stopwatch()..start();
     try {
       final messages = [
-        const LlamaChatMessage.fromText(role: LlamaChatRole.system, text: _systemPrompt),
+        const LlamaChatMessage.fromText(
+          role: LlamaChatRole.system,
+          text: _systemPrompt,
+        ),
         LlamaChatMessage.fromText(role: LlamaChatRole.user, text: cleanQuery),
       ];
       final buffer = StringBuffer();
@@ -467,8 +505,13 @@ class NanoAiService extends ChangeNotifier {
       await for (final chunk in engine.create(
         messages,
         enableThinking: false,
+        responseFormat: LlamaStructuredOutput.jsonSchema(
+          schema: intentJsonSchema,
+          decoder: parseAiToolJson,
+          name: 'cue_intent',
+        ).responseFormat,
         params: const GenerationParams(
-          maxTokens: 72,
+          maxTokens: 128,
           temp: 0.0,
           topK: 1,
           reusePromptPrefix: true,
@@ -488,12 +531,14 @@ class NanoAiService extends ChangeNotifier {
       sw.stop();
       final ms = sw.elapsedMilliseconds;
       final rawPreview = raw.replaceAll(RegExp(r'\s+'), ' ');
-      final shortRaw = rawPreview.length > 72 ? '${rawPreview.substring(0, 72)}...' : rawPreview;
+      final shortRaw = rawPreview.length > 72
+          ? '${rawPreview.substring(0, 72)}...'
+          : rawPreview;
       final summary = call != null
           ? '${call.tool} ($ms ms)'
           : jsonObj != null
-              ? 'none ($ms ms) · $shortRaw'
-              : 'unparsed ($ms ms) · ${shortRaw.isEmpty ? "<empty>" : shortRaw}';
+          ? 'none ($ms ms) · $shortRaw'
+          : 'unparsed ($ms ms) · ${shortRaw.isEmpty ? "<empty>" : shortRaw}';
       debugPrint('[NanoAI] "$cleanQuery" -> $summary');
       _updateSnapshot(
         AiEngineSnapshot(
@@ -511,7 +556,9 @@ class NanoAiService extends ChangeNotifier {
       sw.stop();
       final ms = sw.elapsedMilliseconds;
       final errText = e.toString().replaceAll(RegExp(r'\s+'), ' ');
-      final shortErr = errText.length > 80 ? '${errText.substring(0, 80)}...' : errText;
+      final shortErr = errText.length > 80
+          ? '${errText.substring(0, 80)}...'
+          : errText;
       debugPrint('[NanoAI] error on "$cleanQuery" ($ms ms): $e\n$st');
       _updateSnapshot(
         AiEngineSnapshot(
@@ -543,81 +590,218 @@ class NanoAiService extends ChangeNotifier {
     final dayOffset = (json['dayOffset'] as num?)?.toInt() ?? 0;
 
     switch (tool) {
+      case 'record_audio_start':
+      case 'record_audio_stop':
+        return PlannedToolCall(
+          tool: tool,
+          args: {if (message.isNotEmpty) 'title': message},
+          source: 'nano_ai',
+        );
+      case 'record_audio_pause':
+      case 'record_audio_resume':
+      case 'camera_video_start':
+      case 'camera_video_stop':
+      case 'camera_cancel':
+      case 'whatsapp_finish_voice':
+      case 'whatsapp_cancel_voice':
+      case 'media_stop_playback':
+        return PlannedToolCall(tool: tool, source: 'nano_ai');
+      case 'camera_photo':
+      case 'camera_switch':
+        return PlannedToolCall(
+          tool: tool,
+          args: {
+            if (json['lens'] != null) 'lens': json['lens'],
+            'countdown': ((json['countdown'] as num?)?.toInt() ?? 0).clamp(
+              0,
+              30,
+            ),
+          },
+          source: 'nano_ai',
+        );
+      case 'whatsapp_share_media':
+      case 'whatsapp_start_voice':
+        if (target.isEmpty) return null;
+        return PlannedToolCall(
+          tool: tool,
+          args: {
+            'recipient': target,
+            if (tool == 'whatsapp_share_media')
+              'kind': {'photo', 'video', 'audio'}.contains(query) ? query : '',
+          },
+          source: 'nano_ai',
+        );
+      case 'media_play':
+      case 'media_transcribe':
+        return PlannedToolCall(
+          tool: tool,
+          args: {'query': query},
+          source: 'nano_ai',
+        );
+      case 'run_routine':
+        if (target.isEmpty && query.isEmpty) return null;
+        return PlannedToolCall(
+          tool: tool,
+          args: {'name': target.isNotEmpty ? target : query},
+          source: 'nano_ai',
+        );
       case 'whatsapp_send':
         if (target.isEmpty) return null;
         if (message.isEmpty) {
-          return PlannedToolCall(tool: 'whatsapp_prompt_message', args: {'recipient': target}, source: 'nano_ai');
+          return PlannedToolCall(
+            tool: 'whatsapp_prompt_message',
+            args: {'recipient': target},
+            source: 'nano_ai',
+          );
         }
-        return PlannedToolCall(tool: 'whatsapp_send', args: {'recipient': target, 'message': message}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'whatsapp_send',
+          args: {'recipient': target, 'message': message},
+          source: 'nano_ai',
+        );
       case 'whatsapp_call':
         if (target.isEmpty) return null;
-        return PlannedToolCall(tool: 'whatsapp_call', args: {'recipient': target, 'video': enabled ?? false}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'whatsapp_call',
+          args: {'recipient': target, 'video': enabled ?? false},
+          source: 'nano_ai',
+        );
       case 'make_call':
         if (target.isEmpty) return null;
-        return PlannedToolCall(tool: 'make_call', args: {'target': target, 'dialOnly': false}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'make_call',
+          args: {'target': target, 'dialOnly': false},
+          source: 'nano_ai',
+        );
       case 'send_sms':
         if (target.isEmpty || message.isEmpty) return null;
-        return PlannedToolCall(tool: 'send_sms', args: {'recipient': target, 'message': message}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'send_sms',
+          args: {'recipient': target, 'message': message},
+          source: 'nano_ai',
+        );
       case 'open_app':
         final app = target.isNotEmpty ? target : query;
         if (app.isEmpty) return null;
-        return PlannedToolCall(tool: 'open_app', args: {'app': app}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'open_app',
+          args: {'app': app},
+          source: 'nano_ai',
+        );
       case 'install_app_play_store':
         final app = target.isNotEmpty ? target : query;
         if (app.isEmpty) return null;
-        return PlannedToolCall(tool: 'install_app_play_store', args: {'appName': app}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'install_app_play_store',
+          args: {'appName': app},
+          source: 'nano_ai',
+        );
       case 'spotify_play':
       case 'youtube_search':
       case 'ask_internet':
         final q = query.isNotEmpty ? query : target;
         if (q.isEmpty) return null;
-        return PlannedToolCall(tool: tool, args: {'query': q}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: tool,
+          args: {'query': q},
+          source: 'nano_ai',
+        );
       case 'get_weather':
-        return PlannedToolCall(tool: 'get_weather', args: {'location': query.isNotEmpty ? query : target}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'get_weather',
+          args: {'location': query.isNotEmpty ? query : target},
+          source: 'nano_ai',
+        );
       case 'get_news':
-        return PlannedToolCall(tool: 'get_news', args: {'topic': query.isNotEmpty ? query : target}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'get_news',
+          args: {'topic': query.isNotEmpty ? query : target},
+          source: 'nano_ai',
+        );
       case 'open_camera':
-        return PlannedToolCall(tool: 'open_camera', args: {'mode': query.isNotEmpty ? query : 'photo'}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'open_camera',
+          args: {'mode': query.isNotEmpty ? query : 'photo'},
+          source: 'nano_ai',
+        );
       case 'open_calendar':
       case 'read_messages':
       case 'read_notifications':
       case 'get_device_status':
         return PlannedToolCall(tool: tool, source: 'nano_ai');
       case 'add_calendar_event':
-        final title = message.isNotEmpty ? message : (query.isNotEmpty ? query : 'CueUI Event');
+        final title = message.isNotEmpty
+            ? message
+            : (query.isNotEmpty ? query : 'CueUI Event');
         return PlannedToolCall(
           tool: 'add_calendar_event',
-          args: {'title': title, 'hour': ?hour, 'minute': minute, 'dayOffset': dayOffset},
+          args: {
+            'title': title,
+            'hour': ?hour,
+            'minute': minute,
+            'dayOffset': dayOffset,
+          },
           source: 'nano_ai',
         );
       case 'set_alarm':
         if (hour == null) return null;
         return PlannedToolCall(
           tool: 'set_alarm',
-          args: {'hour': hour, 'minute': minute, 'label': message.isNotEmpty ? message : 'CueUI Alarm'},
+          args: {
+            'hour': hour,
+            'minute': minute,
+            'label': message.isNotEmpty ? message : 'CueUI Alarm',
+          },
           source: 'nano_ai',
         );
       case 'set_timer':
         if (seconds == null || seconds <= 0) return null;
         return PlannedToolCall(
           tool: 'set_timer',
-          args: {'seconds': seconds, 'label': message.isNotEmpty ? message : 'CueUI Timer'},
+          args: {
+            'seconds': seconds,
+            'label': message.isNotEmpty ? message : 'CueUI Timer',
+          },
           source: 'nano_ai',
         );
       case 'set_flashlight':
       case 'set_dnd':
-        return PlannedToolCall(tool: tool, args: {'enabled': enabled ?? true}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: tool,
+          args: {'enabled': enabled ?? true},
+          source: 'nano_ai',
+        );
       case 'set_brightness':
-        return PlannedToolCall(tool: 'set_brightness', args: {'percent': (percent ?? 50).clamp(0, 100)}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: 'set_brightness',
+          args: {'percent': (percent ?? 50).clamp(0, 100)},
+          source: 'nano_ai',
+        );
       case 'open_connectivity_panel':
-        final setting = query.isNotEmpty ? query : (target.isNotEmpty ? target : 'wifi');
-        return PlannedToolCall(tool: tool, args: {'setting': setting, 'desired': enabled}, source: 'nano_ai');
+        final setting = query.isNotEmpty
+            ? query
+            : (target.isNotEmpty ? target : 'wifi');
+        return PlannedToolCall(
+          tool: tool,
+          args: {'setting': setting, 'desired': enabled},
+          source: 'nano_ai',
+        );
       case 'media_control':
-        final action = query.isNotEmpty ? query : (target.isNotEmpty ? target : 'play_pause');
-        return PlannedToolCall(tool: tool, args: {'action': action}, source: 'nano_ai');
+        final action = query.isNotEmpty
+            ? query
+            : (target.isNotEmpty ? target : 'play_pause');
+        return PlannedToolCall(
+          tool: tool,
+          args: {'action': action},
+          source: 'nano_ai',
+        );
       case 'reply_notification':
         if (target.isEmpty || message.isEmpty) return null;
-        return PlannedToolCall(tool: tool, args: {'senderQuery': target, 'message': message}, source: 'nano_ai');
+        return PlannedToolCall(
+          tool: tool,
+          args: {'senderQuery': target, 'message': message},
+          source: 'nano_ai',
+        );
       default:
         return null;
     }

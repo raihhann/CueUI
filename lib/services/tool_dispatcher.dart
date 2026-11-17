@@ -3,6 +3,8 @@ import 'internet_search_service.dart';
 import 'native_bridge.dart';
 import 'weather_service.dart';
 import 'whatsapp_automator.dart';
+import 'media_service.dart';
+import 'routine_service.dart';
 
 typedef ConfirmActionFn = Future<bool> Function(String prompt);
 
@@ -12,7 +14,11 @@ class CueToolDispatcher {
     required this.internetSearch,
     required this.weatherService,
     required this.confirmAction,
+    CueMediaService? media,
+    CueRoutineService? routines,
   }) {
+    this.media = media ?? CueMediaService(nativeApi);
+    this.routines = routines ?? CueRoutineService();
     _whatsAppAutomator = WhatsAppAutomator(_NativeWhatsAppDriver(nativeApi));
   }
 
@@ -21,6 +27,9 @@ class CueToolDispatcher {
   final WeatherService weatherService;
   final ConfirmActionFn confirmAction;
   late final WhatsAppAutomator _whatsAppAutomator;
+  late final CueMediaService media;
+  late final CueRoutineService routines;
+  bool whatsAppVoiceActive = false;
 
   Future<List<UiNodeInfo>> captureUiNodes() => nativeApi.captureUiNodes();
 
@@ -30,6 +39,155 @@ class CueToolDispatcher {
   }) async {
     final args = call.args;
     switch (call.tool) {
+      case 'record_audio_start':
+        return media.command('start_audio', args);
+      case 'record_audio_pause':
+        return media.command('pause_audio');
+      case 'record_audio_resume':
+        return media.command('resume_audio');
+      case 'record_audio_stop':
+        if (media.videoActive) return media.command('stop_video');
+        if (whatsAppVoiceActive) return _finishVoiceNote(false);
+        return media.command('stop_audio', args);
+      case 'camera_photo':
+        return media.command('take_photo', args);
+      case 'camera_video_start':
+        return media.command('start_video', args);
+      case 'camera_video_stop':
+        return media.command('stop_video');
+      case 'camera_switch':
+        return media.command('switch_camera', args);
+      case 'camera_cancel':
+        return media.command('cancel_capture');
+      case 'media_stop_playback':
+        return media.command('stop_playback');
+      case 'media_play':
+      case 'media_transcribe':
+        final query = _str(args, 'query').toLowerCase();
+        final item = media.items
+            .where(
+              (item) =>
+                  item.kind == 'audio' &&
+                  item.title.toLowerCase().contains(query),
+            )
+            .firstOrNull;
+        if (item == null) {
+          return const ToolExecutionResult(
+            ok: false,
+            summary: 'No matching saved audio recording.',
+          );
+        }
+        return media.command(
+          call.tool == 'media_play' ? 'play' : 'transcribe',
+          {'id': item.id},
+        );
+      case 'run_routine':
+        final routine = routines.find(_str(args, 'name'));
+        if (routine == null) {
+          return const ToolExecutionResult(
+            ok: false,
+            summary: 'Routine not found. Create it in Routines first.',
+          );
+        }
+        final summaries = <String>[];
+        for (final step in routine.steps) {
+          if (canContinue?.call() == false) {
+            return const ToolExecutionResult(
+              ok: false,
+              summary: 'Routine stopped. Completed actions remain applied.',
+            );
+          }
+          final result = await execute(step, canContinue: canContinue);
+          summaries.add(result.summary);
+          if (!result.ok) {
+            return ToolExecutionResult(
+              ok: false,
+              summary: '${routine.name} stopped: ${summaries.join('\n')}',
+              data: result.data,
+            );
+          }
+        }
+        return ToolExecutionResult(
+          ok: true,
+          summary: '${routine.name} completed:\n${summaries.join('\n')}',
+        );
+      case 'whatsapp_share_media':
+      case 'whatsapp_start_voice':
+        final recipient = _str(args, 'recipient');
+        final package = await nativeApi.findWhatsAppPackage();
+        if (package == null) {
+          return const ToolExecutionResult(
+            ok: false,
+            summary: 'WhatsApp is not installed.',
+            data: {
+              'missingAppName': 'WhatsApp',
+              'missingPackage': 'com.whatsapp',
+            },
+          );
+        }
+        if (!await nativeApi.isAccessibilityConnected()) {
+          return const ToolExecutionResult(
+            ok: false,
+            summary: 'Enable Accessibility to select a WhatsApp recipient.',
+            data: {
+              'missingPermissionKey': 'ACCESSIBILITY',
+              'missingPermissionLabel': 'Accessibility Control',
+            },
+          );
+        }
+        if (recipient.isEmpty) {
+          return const ToolExecutionResult(
+            ok: false,
+            summary: 'Who should receive it? Give a contact name.',
+          );
+        }
+        await nativeApi.collapseBubble();
+        ToolExecutionResult result;
+        if (call.tool == 'whatsapp_share_media') {
+          final id = _str(args, 'id').isNotEmpty
+              ? _str(args, 'id')
+              : media
+                    .latest(
+                      _str(args, 'kind').isEmpty ? null : _str(args, 'kind'),
+                    )
+                    ?.id;
+          if (id == null) {
+            return const ToolExecutionResult(
+              ok: false,
+              summary:
+                  'Capture or record something first, or select an item in Library.',
+            );
+          }
+          final opened = await media.command('share', {
+            'id': id,
+            'package': package,
+            'caption': _str(args, 'caption'),
+          });
+          if (!opened.ok) return opened;
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+          result = await _whatsAppAutomator.sendSharedMedia(
+            recipient,
+            selectedChat: args['selectedChat']?.toString(),
+            canContinue: canContinue,
+          );
+          return _recipientResult(result, call, extraArgs: {'id': id});
+        }
+        result = await _whatsAppAutomator.startVoiceMessage(
+          recipient,
+          selectedChat: args['selectedChat']?.toString(),
+          canContinue: canContinue,
+        );
+        if (result.ok) {
+          whatsAppVoiceActive = true;
+          await nativeApi.mediaCommand('external_voice_state', {
+            'active': true,
+          });
+        }
+        return _recipientResult(result, call);
+      case 'whatsapp_finish_voice':
+        return _finishVoiceNote(false);
+      case 'whatsapp_cancel_voice':
+        return _finishVoiceNote(true);
       case 'find_contact':
         return nativeApi.findContacts(_str(args, 'name'));
 
@@ -208,9 +366,9 @@ class CueToolDispatcher {
 
       case 'open_camera':
         await nativeApi.collapseBubble();
-        return nativeApi.openCamera(
-          _str(args, 'mode').isEmpty ? 'photo' : _str(args, 'mode'),
-        );
+        return media.command('preview', {
+          'lens': _str(args, 'mode') == 'selfie' ? 'front' : 'back',
+        });
 
       case 'open_calendar':
         await nativeApi.collapseBubble();
@@ -402,6 +560,53 @@ class CueToolDispatcher {
     }
   }
 
+  ToolExecutionResult _recipientResult(
+    ToolExecutionResult result,
+    PlannedToolCall call, {
+    Map<String, dynamic> extraArgs = const {},
+  }) => ToolExecutionResult(
+    ok: result.ok,
+    summary: result.summary,
+    data: {
+      ...result.data,
+      'recipient': call.args['selectedChat'] ?? call.args['recipient'],
+      if (result.data['whatsappRecipients'] != null) 'retryTool': call.tool,
+      if (result.data['whatsappRecipients'] != null)
+        'retryArgs': {...call.args, ...extraArgs},
+    },
+  );
+
+  Future<ToolExecutionResult> _finishVoiceNote(bool cancel) async {
+    if (!whatsAppVoiceActive) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary: 'No WhatsApp voice message is being recorded.',
+      );
+    }
+    await nativeApi.collapseBubble();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    if (!{
+      'com.whatsapp',
+      'com.whatsapp.w4b',
+    }.contains(await nativeApi.getForegroundPackage())) {
+      final package = await nativeApi.findWhatsAppPackage();
+      if (package == null) {
+        return const ToolExecutionResult(
+          ok: false,
+          summary: 'WhatsApp is unavailable.',
+        );
+      }
+      await nativeApi.launchPackage(package);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+    }
+    final result = await _whatsAppAutomator.finishVoiceMessage(cancel: cancel);
+    if (result.ok || result.data['recordingAbsent'] == true) {
+      whatsAppVoiceActive = false;
+      await nativeApi.mediaCommand('external_voice_state', {'active': false});
+    }
+    return result;
+  }
+
   static String _str(Map<String, dynamic> args, String key) =>
       (args[key] ?? '').toString().trim();
   static int _int(Map<String, dynamic> args, String key, int def) =>
@@ -415,6 +620,14 @@ class CueToolDispatcher {
 class _NativeWhatsAppDriver implements WhatsAppUiDriver {
   _NativeWhatsAppDriver(this._api);
   final CueNativeApi _api;
+  @override
+  Future<bool> isWhatsAppForeground() async => {
+    'com.whatsapp',
+    'com.whatsapp.w4b',
+  }.contains(await _api.getForegroundPackage());
+  @override
+  Future<bool> startVoiceNote(int index) async =>
+      (await _api.startWhatsAppVoiceNote(index)).ok;
 
   @override
   Future<bool> goBack() async => (await _api.pressKey('BACK')).ok;

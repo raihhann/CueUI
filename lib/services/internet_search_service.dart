@@ -16,7 +16,8 @@ class NewsHeadline {
 }
 
 class InternetSearchService {
-  InternetSearchService({http.Client? client}) : _client = client ?? http.Client();
+  InternetSearchService({http.Client? client})
+    : _client = client ?? http.Client();
 
   final http.Client _client;
 
@@ -40,13 +41,20 @@ class InternetSearchService {
       if (items.isEmpty) {
         return ToolExecutionResult(
           ok: true,
-          summary: 'No headlines returned right now — tap Open in Browser to view Google News.',
+          summary:
+              'No headlines returned right now — tap Open in Browser to view Google News.',
           data: {'openUrl': webUrl},
         );
       }
-      final heading = cleanTopic.isEmpty ? 'Top news right now:' : 'Latest news on "$cleanTopic":';
+      final heading = cleanTopic.isEmpty
+          ? 'Top news right now:'
+          : 'Latest news on "$cleanTopic":';
       final body = items
-          .map((item) => item.source.isNotEmpty ? '• ${item.title} (${item.source})' : '• ${item.title}')
+          .map(
+            (item) => item.source.isNotEmpty
+                ? '• ${item.title} (${item.source})'
+                : '• ${item.title}',
+          )
           .join('\n');
       final firstLink = items.first.link.trim();
       return ToolExecutionResult(
@@ -57,7 +65,8 @@ class InternetSearchService {
     } catch (e) {
       return ToolExecutionResult(
         ok: false,
-        summary: "Could not load news ($e). Tap Open in Browser if you're online.",
+        summary:
+            "Could not load news ($e). Tap Open in Browser if you're online.",
         data: {'openUrl': webUrl},
       );
     }
@@ -66,31 +75,44 @@ class InternetSearchService {
   Future<ToolExecutionResult> answerQuestion(String rawQuery) async {
     final cleaned = rawQuery.trim();
     if (cleaned.isEmpty) {
-      return const ToolExecutionResult(ok: false, summary: 'Ask a question or give a search term.');
+      return const ToolExecutionResult(
+        ok: false,
+        summary: 'Ask a question or give a search term.',
+      );
     }
     final subject = extractLookupSubject(cleaned);
-    final searchUrl = 'https://www.google.com/search?q=${Uri.encodeQueryComponent(cleaned)}';
+    final searchUrl =
+        'https://www.google.com/search?q=${Uri.encodeQueryComponent(cleaned)}';
 
     try {
       // 1. Dictionary API for word meanings
       final wordTokens = subject.split(RegExp(r'\s+'));
-      final looksLikeWordDef = _definitionPrefixRe.hasMatch(cleaned) &&
+      final looksLikeWordDef =
+          _definitionPrefixRe.hasMatch(cleaned) &&
           wordTokens.length <= 2 &&
           RegExp(r'^[a-zA-Z-\s]+$').hasMatch(subject);
       if (looksLikeWordDef) {
         try {
           final wordEnc = Uri.encodeComponent(subject.toLowerCase());
-          final dictBody = await _httpGet('https://api.dictionaryapi.dev/api/v2/entries/en/$wordEnc');
+          final dictBody = await _httpGet(
+            'https://api.dictionaryapi.dev/api/v2/entries/en/$wordEnc',
+          );
           final def = parseDictionaryDefinition(dictBody);
           if (def != null && def.isNotEmpty) {
-            return ToolExecutionResult(ok: true, summary: def, data: {'openUrl': searchUrl});
+            return ToolExecutionResult(
+              ok: true,
+              summary: def,
+              data: {'openUrl': searchUrl},
+            );
           }
         } catch (_) {}
       }
 
       // 2. DuckDuckGo Instant Answer API
       try {
-        final ddgEnc = Uri.encodeQueryComponent(subject.isEmpty ? cleaned : subject);
+        final ddgEnc = Uri.encodeQueryComponent(
+          subject.isEmpty ? cleaned : subject,
+        );
         final ddgBody = await _httpGet(
           'https://api.duckduckgo.com/?q=$ddgEnc&format=json&no_html=1&skip_disambig=1',
         );
@@ -106,14 +128,18 @@ class InternetSearchService {
 
       // 3. Wikipedia Search + Summary API
       try {
-        final wikiEnc = Uri.encodeQueryComponent(subject.isEmpty ? cleaned : subject);
+        final wikiEnc = Uri.encodeQueryComponent(
+          subject.isEmpty ? cleaned : subject,
+        );
         final wikiSearchBody = await _httpGet(
           'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=$wikiEnc&srlimit=1&format=json',
         );
         final wikiTitle = parseWikipediaSearchTitle(wikiSearchBody);
         if (wikiTitle != null && wikiTitle.isNotEmpty) {
           final slug = Uri.encodeComponent(wikiTitle.replaceAll(' ', '_'));
-          final summaryBody = await _httpGet('https://en.wikipedia.org/api/rest_v1/page/summary/$slug');
+          final summaryBody = await _httpGet(
+            'https://en.wikipedia.org/api/rest_v1/page/summary/$slug',
+          );
           final summary = parseWikipediaSummary(summaryBody);
           if (summary != null) {
             return ToolExecutionResult(
@@ -127,7 +153,8 @@ class InternetSearchService {
 
       return ToolExecutionResult(
         ok: true,
-        summary: 'I couldn\'t find an instant summary for "$cleaned". Tap Open in Browser to view web results.',
+        summary:
+            'I couldn\'t find an instant summary for "$cleaned". Tap Open in Browser to view web results.',
         data: {'openUrl': searchUrl},
       );
     } catch (e) {
@@ -144,7 +171,8 @@ class InternetSearchService {
         .get(
           Uri.parse(url),
           headers: const {
-            'Accept': 'application/json, application/rss+xml, application/xml, text/xml',
+            'Accept':
+                'application/json, application/rss+xml, application/xml, text/xml',
             'User-Agent': 'CueUI-Flutter/1.0',
           },
         )
@@ -159,10 +187,19 @@ class InternetSearchService {
     var q = rawQuery.trim().replaceAll(RegExp(r'[?!.]+$'), '').trim();
     final patterns = [
       RegExp(r'^what\s+does\s+(.+?)\s+mean$', caseSensitive: false),
-      RegExp(r'^(?:what\s+is\s+(?:the\s+)?meaning\s+of|meaning\s+of|definition\s+of|define)\s+(.+)$', caseSensitive: false),
-      RegExp(r'^(?:search(?:\s+(?:google|the\s+web|online))?\s+for|look\s+up|google)\s+(.+)$', caseSensitive: false),
+      RegExp(
+        r'^(?:what\s+is\s+(?:the\s+)?meaning\s+of|meaning\s+of|definition\s+of|define)\s+(.+)$',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r'^(?:search(?:\s+(?:google|the\s+web|online))?\s+for|look\s+up|google)\s+(.+)$',
+        caseSensitive: false,
+      ),
       RegExp(r'^(?:tell\s+me\s+about|explain)\s+(.+)$', caseSensitive: false),
-      RegExp(r'^(?:who|what)\s+(?:is|was|are|were)\s+(.+)$', caseSensitive: false),
+      RegExp(
+        r'^(?:who|what)\s+(?:is|was|are|were)\s+(.+)$',
+        caseSensitive: false,
+      ),
     ];
     for (final re in patterns) {
       final m = re.firstMatch(q);
@@ -170,7 +207,10 @@ class InternetSearchService {
         final captured = (m.group(1) ?? '').trim();
         if (captured.isNotEmpty) {
           return captured
-              .replaceFirst(RegExp(r'^(?:a|an|the)\s+', caseSensitive: false), '')
+              .replaceFirst(
+                RegExp(r'^(?:a|an|the)\s+', caseSensitive: false),
+                '',
+              )
               .trim();
         }
       }
@@ -219,7 +259,9 @@ class InternetSearchService {
       if (abs.isNotEmpty) {
         final heading = (root['Heading'] ?? '').toString().trim();
         final text = trimToConciseSentences(abs);
-        final formatted = heading.isNotEmpty && !text.toLowerCase().startsWith(heading.toLowerCase())
+        final formatted =
+            heading.isNotEmpty &&
+                !text.toLowerCase().startsWith(heading.toLowerCase())
             ? '$heading: $text'
             : text;
         return (formatted, url);
@@ -260,9 +302,13 @@ class InternetSearchService {
       final title = (root['title'] ?? '').toString().trim();
       final contentUrls = root['content_urls'];
       final desktop = contentUrls is Map ? contentUrls['desktop'] : null;
-      final pageUrl = desktop is Map ? (desktop['page'] ?? '').toString().trim() : '';
+      final pageUrl = desktop is Map
+          ? (desktop['page'] ?? '').toString().trim()
+          : '';
       final concise = trimToConciseSentences(extract);
-      final text = title.isNotEmpty && !concise.toLowerCase().startsWith(title.toLowerCase())
+      final text =
+          title.isNotEmpty &&
+              !concise.toLowerCase().startsWith(title.toLowerCase())
           ? '$title: $concise'
           : concise;
       return (text, pageUrl);
@@ -271,7 +317,10 @@ class InternetSearchService {
     }
   }
 
-  static List<NewsHeadline> parseRssHeadlines(String xmlText, {int maxItems = 5}) {
+  static List<NewsHeadline> parseRssHeadlines(
+    String xmlText, {
+    int maxItems = 5,
+  }) {
     try {
       final doc = XmlDocument.parse(xmlText);
       final items = doc.findAllElements('item');

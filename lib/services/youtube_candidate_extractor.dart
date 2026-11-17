@@ -2,12 +2,42 @@ import '../models/cue_models.dart';
 
 class YouTubeCandidateExtractor {
   static const _noiseExact = {
-    'search', 'search youtube', 'navigate up', 'voice search', 'clear', 'home',
-    'shorts', 'subscriptions', 'library', 'you', 'explore', 'all', 'filters',
-    'videos', 'channels', 'playlists', 'recently uploaded', 'watched', 'live',
-    'more options', 'action menu', 'cast', 'notifications', 'create', 'sign in',
-    'open app', 'skip', 'share', 'download', 'save', 'sponsored', 'about these results',
-    'herunterladen', 'install', 'watch', 'start now',
+    'search',
+    'search youtube',
+    'navigate up',
+    'voice search',
+    'clear',
+    'home',
+    'shorts',
+    'subscriptions',
+    'library',
+    'you',
+    'explore',
+    'all',
+    'filters',
+    'videos',
+    'channels',
+    'playlists',
+    'recently uploaded',
+    'watched',
+    'live',
+    'more options',
+    'action menu',
+    'cast',
+    'notifications',
+    'create',
+    'sign in',
+    'open app',
+    'skip',
+    'share',
+    'download',
+    'save',
+    'sponsored',
+    'about these results',
+    'herunterladen',
+    'install',
+    'watch',
+    'start now',
   };
 
   static const _blockedSubstrings = [
@@ -38,28 +68,31 @@ class YouTubeCandidateExtractor {
   }) {
     final cleanedQuery = query.trim().toLowerCase();
 
-    final eligibleNodes = nodes
-        .where((n) => !n.editable && n.top >= 200)
-        .where((n) {
-          final cls = n.className.toLowerCase();
-          return !cls.contains('imagebutton') && !cls.contains('imageview');
-        })
-        .toList();
+    final eligibleNodes = nodes.where((n) => !n.editable && n.top >= 200).where(
+      (n) {
+        final cls = n.className.toLowerCase();
+        return !cls.contains('imagebutton') && !cls.contains('imageview');
+      },
+    ).toList();
 
     final explicitVideoNodes = eligibleNodes.where((node) {
       final combined = '${node.contentDesc} ${node.text}'.toLowerCase();
-      return (combined.contains('play video') || combined.contains('- go to channel')) &&
+      return (combined.contains('play video') ||
+              combined.contains('- go to channel')) &&
           !_blockedSubstrings.any(combined.contains);
     }).toList();
 
-    final sourceNodes = (explicitVideoNodes.isNotEmpty ? explicitVideoNodes : eligibleNodes)
-      ..sort((a, b) => a.top.compareTo(b.top));
+    final sourceNodes =
+        (explicitVideoNodes.isNotEmpty ? explicitVideoNodes : eligibleNodes)
+          ..sort((a, b) => a.top.compareTo(b.top));
 
     final seenTitles = <String>{};
     final candidates = <VideoCandidate>[];
 
     for (final node in sourceNodes) {
-      final raw = (node.contentDesc.trim().isNotEmpty ? node.contentDesc : node.text).trim();
+      final raw =
+          (node.contentDesc.trim().isNotEmpty ? node.contentDesc : node.text)
+              .trim();
       if (raw.length < 10 || raw.length > 360) continue;
       final rawLower = raw.toLowerCase();
       if (_blockedSubstrings.any(rawLower.contains)) continue;
@@ -78,7 +111,9 @@ class YouTubeCandidateExtractor {
       final dedupKey = lower.length > 60 ? lower.substring(0, 60) : lower;
       if (!seenTitles.add(dedupKey)) continue;
 
-      candidates.add(VideoCandidate(title: title, nodeIndex: node.index, yTop: node.top));
+      candidates.add(
+        VideoCandidate(title: title, nodeIndex: node.index, yTop: node.top),
+      );
       if (candidates.length >= maxResults) break;
     }
     return candidates;
@@ -90,7 +125,12 @@ class YouTubeCandidateExtractor {
         .map((s) => s.trim())
         .firstWhere((s) => s.isNotEmpty, orElse: () => '');
     var cut = firstLine;
-    for (final marker in const [' -  -  - ', ' - Go to channel', ' - play video', ' - Play video']) {
+    for (final marker in const [
+      ' -  -  - ',
+      ' - Go to channel',
+      ' - play video',
+      ' - Play video',
+    ]) {
       final idx = cut.indexOf(marker);
       if (idx >= 0) cut = cut.substring(0, idx);
     }

@@ -13,6 +13,8 @@ abstract class WhatsAppUiDriver {
   Future<bool> tapNode(int nodeIndex);
   Future<bool> typeText(String text);
   Future<bool> goBack();
+  Future<bool> startVoiceNote(int index);
+  Future<bool> isWhatsAppForeground();
   Future<void> pauseMs(int ms);
 }
 
@@ -85,6 +87,7 @@ class WhatsAppAutomator {
       }
       final sendAfterLink = findSendButton(afterLaunch);
       if (canContinue?.call() == false) return _cancelled;
+      if (!await driver.isWhatsAppForeground()) return _wrongApp;
       if (sendAfterLink != null && await driver.tapNode(sendAfterLink.index)) {
         return ToolExecutionResult(
           ok: true,
@@ -106,7 +109,9 @@ class WhatsAppAutomator {
       selectedChat: selectedChat,
     );
     if (openErr != null) {
-      if (openErr.data['whatsappRecipients'] != null || selectedChat != null) {
+      if (openErr.data['whatsappRecipients'] != null ||
+          selectedChat != null ||
+          openErr.data['doNotFallback'] == true) {
         return openErr;
       }
       final fallbackDigits = await driver.resolvePhoneDigits(cleanRecipient);
@@ -120,6 +125,7 @@ class WhatsAppAutomator {
         final linkNodes = await driver.captureNodes();
         final sendBtn = findSendButton(linkNodes);
         if (canContinue?.call() == false) return _cancelled;
+        if (!await driver.isWhatsAppForeground()) return _wrongApp;
         if (sendBtn != null && await driver.tapNode(sendBtn.index)) {
           return ToolExecutionResult(
             ok: true,
@@ -156,6 +162,7 @@ class WhatsAppAutomator {
 
     nodes = await driver.captureNodes();
     if (canContinue?.call() == false) return _cancelled;
+    if (!await driver.isWhatsAppForeground()) return _wrongApp;
     final sendBtn = findSendButton(nodes);
     if (sendBtn == null) {
       return ToolExecutionResult(
@@ -178,6 +185,208 @@ class WhatsAppAutomator {
   static const _cancelled = ToolExecutionResult(
     ok: false,
     summary: 'WhatsApp message cancelled.',
+  );
+  static const _wrongApp = ToolExecutionResult(
+    ok: false,
+    summary: 'WhatsApp left the screen. Return to the chat and try again.',
+    data: {'doNotFallback': true},
+  );
+
+  Future<ToolExecutionResult> sendSharedMedia(
+    String recipient, {
+    String? selectedChat,
+    bool Function()? canContinue,
+  }) async {
+    final package = await driver.findWhatsAppPackage();
+    if (package == null) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary: 'WhatsApp is not installed.',
+      );
+    }
+    final (name, error) = await _openChatInWhatsApp(
+      package,
+      recipient,
+      requireUnique: true,
+      selectedChat: selectedChat,
+      launch: false,
+    );
+    if (error != null) return error;
+    if (canContinue?.call() == false) return _cancelled;
+    if (!await driver.isWhatsAppForeground()) return _wrongApp;
+    await driver.pauseMs(stepWaitMs);
+    var nodes = await driver.captureNodes();
+    // The picker first advances to a media preview; the second Send submits it.
+    if (_hasChatComposer(nodes)) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'WhatsApp opened a chat instead of the media-sharing picker. Please finish sharing in WhatsApp.',
+      );
+    }
+    final pickerSend =
+        findSendButton(nodes) ??
+        nodes
+            .where(
+              (node) =>
+                  node.clickable &&
+                  {'next', 'forward'}.contains(node.primaryLabel.toLowerCase()),
+            )
+            .firstOrNull;
+    if (pickerSend == null || !await driver.tapNode(pickerSend.index)) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'Selected the contact, but could not advance the WhatsApp media preview. Finish sharing in WhatsApp.',
+      );
+    }
+    await driver.pauseMs(searchWaitMs);
+    nodes = await driver.captureNodes();
+    if (canContinue?.call() == false) return _cancelled;
+    final send = findSendButton(nodes);
+    if (!await driver.isWhatsAppForeground()) return _wrongApp;
+    if (send != null && !_hasChatComposer(nodes)) {
+      if (!await driver.tapNode(send.index)) {
+        return const ToolExecutionResult(
+          ok: false,
+          summary: 'Could not send the WhatsApp media preview.',
+        );
+      }
+    } else if (findMessageInputField(nodes) == null) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'WhatsApp did not show a recognizable media preview or chat. Check sharing in WhatsApp.',
+      );
+    }
+    return ToolExecutionResult(
+      ok: true,
+      summary: 'Submitted media to ${name ?? recipient} on WhatsApp.',
+      data: {'recipient': name ?? recipient},
+    );
+  }
+
+  Future<ToolExecutionResult> startVoiceMessage(
+    String recipient, {
+    String? selectedChat,
+    bool Function()? canContinue,
+  }) async {
+    final package = await driver.findWhatsAppPackage();
+    if (package == null) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary: 'WhatsApp is not installed.',
+      );
+    }
+    final (name, error) = await _openChatInWhatsApp(
+      package,
+      recipient,
+      requireUnique: true,
+      selectedChat: selectedChat,
+    );
+    if (error != null) return error;
+    final nodes = await driver.captureNodes();
+    final entry = findMessageInputField(nodes);
+    if (entry != null &&
+        entry.text.trim().isNotEmpty &&
+        entry.text.toLowerCase() != 'message') {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'There is an existing draft in this chat. Clear it in WhatsApp before recording a voice message.',
+      );
+    }
+    final microphone = nodes
+        .where(
+          (node) =>
+              node.clickable &&
+              ('${node.viewId} ${node.contentDesc}'.toLowerCase().contains(
+                    'voice_note',
+                  ) ||
+                  node.contentDesc.toLowerCase().contains('voice message') ||
+                  node.contentDesc.toLowerCase().contains('record voice')),
+        )
+        .firstOrNull;
+    if (canContinue?.call() == false) return _cancelled;
+    if (microphone == null || !await driver.startVoiceNote(microphone.index)) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'Could not start a locked WhatsApp voice recording. Use the microphone in WhatsApp.',
+      );
+    }
+    await driver.pauseMs(searchWaitMs);
+    final after = await driver.captureNodes();
+    final locked = hasVoiceRecordingControls(after);
+    if (!locked) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'Recording could not be verified. Check WhatsApp before continuing.',
+      );
+    }
+    return ToolExecutionResult(
+      ok: true,
+      summary:
+          'Recording a WhatsApp voice message for ${name ?? recipient}. Type "send voice note" to send, or "cancel voice note" to discard.',
+      data: {'recipient': name ?? recipient},
+    );
+  }
+
+  Future<ToolExecutionResult> finishVoiceMessage({required bool cancel}) async {
+    if (!await driver.isWhatsAppForeground()) return _wrongApp;
+    final nodes = await driver.captureNodes();
+    if (!hasVoiceRecordingControls(nodes)) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'WhatsApp no longer shows an active voice recording. If you finished it manually, no further action is needed.',
+        data: {'recordingAbsent': true},
+      );
+    }
+    final target = cancel
+        ? nodes
+              .where(
+                (node) =>
+                    node.clickable &&
+                    RegExp(
+                      r'^(?:delete|discard|cancel)(?: recording| voice message| voice note)?$',
+                      caseSensitive: false,
+                    ).hasMatch(node.primaryLabel),
+              )
+              .firstOrNull
+        : findSendButton(nodes);
+    if (target == null || !await driver.tapNode(target.index)) {
+      return const ToolExecutionResult(
+        ok: false,
+        summary:
+            'Could not find the WhatsApp recording control. Finish the voice message in WhatsApp.',
+      );
+    }
+    return ToolExecutionResult(
+      ok: true,
+      summary: cancel
+          ? 'Discarded the WhatsApp voice message.'
+          : 'Submitted the WhatsApp voice message.',
+    );
+  }
+
+  static bool hasVoiceRecordingControls(List<UiNodeInfo> nodes) =>
+      findSendButton(nodes) != null &&
+      nodes.any(
+        (node) =>
+            node.clickable &&
+            RegExp(
+              r'^(?:delete|discard|cancel|pause|stop)(?: recording| voice message| voice note)?$',
+              caseSensitive: false,
+            ).hasMatch(node.primaryLabel.trim()),
+      );
+
+  static bool _hasChatComposer(List<UiNodeInfo> nodes) => nodes.any(
+    (node) =>
+        node.editable &&
+        (node.viewId.split('/').last == 'entry' ||
+            node.primaryLabel.trim().toLowerCase() == 'message'),
   );
 
   Future<ToolExecutionResult> callContact(
@@ -232,8 +441,9 @@ class WhatsAppAutomator {
     String recipient, {
     bool requireUnique = false,
     String? selectedChat,
+    bool launch = true,
   }) async {
-    if (!await driver.launchWhatsApp(waPkg)) {
+    if (launch && !await driver.launchWhatsApp(waPkg)) {
       return (
         null,
         ToolExecutionResult(
@@ -244,12 +454,25 @@ class WhatsAppAutomator {
     }
     await driver.pauseMs(launchWaitMs);
 
+    if (!await driver.isWhatsAppForeground()) return (null, _wrongApp);
+
     var nodes = await driver.captureNodes();
     final blocker = findOnboardingBlocker(nodes);
     if (blocker != null) {
       return (null, ToolExecutionResult(ok: false, summary: blocker));
     }
+    if (!launch && _hasChatComposer(nodes)) {
+      return (
+        null,
+        const ToolExecutionResult(
+          ok: false,
+          summary:
+              'WhatsApp did not open the media recipient picker. Try sharing again.',
+          data: {'doNotFallback': true},
+        ),
+      );
 
+    }
     // WhatsApp may resume inside an existing chat, where Search searches that
     // conversation rather than contacts. Return to the chat list first.
     for (

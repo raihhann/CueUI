@@ -4,6 +4,16 @@ import 'package:cueui_flutter/services/youtube_candidate_extractor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _FakeWhatsAppDriver implements WhatsAppUiDriver {
+  bool foreground = true;
+  @override
+  Future<bool> isWhatsAppForeground() async => foreground;
+  final voiceStarts = <int>[];
+  @override
+  Future<bool> startVoiceNote(int index) async {
+    voiceStarts.add(index);
+    return true;
+  }
+
   _FakeWhatsAppDriver(this.stepNodes);
 
   final List<List<UiNodeInfo>> stepNodes;
@@ -91,6 +101,36 @@ UiNodeInfo _node({
 
 void main() {
   group('WhatsAppAutomator', () {
+    test(
+      'a stale chat cannot turn media sharing into sending its text draft',
+      () async {
+        final driver = _FakeWhatsAppDriver([
+          [
+            _node(
+              index: 1,
+              text: 'existing draft',
+              id: 'entry',
+              editable: true,
+              top: 2000,
+            ),
+            _node(
+              index: 2,
+              desc: 'Send',
+              id: 'send',
+              clickable: true,
+              top: 2000,
+            ),
+          ],
+        ]);
+        final result = await WhatsAppAutomator(
+          driver,
+          launchWaitMs: 0,
+        ).sendSharedMedia('Raihan');
+        expect(result.ok, false);
+        expect(driver.tappedIndices, isEmpty);
+        expect(driver.typedText, isNull);
+      },
+    );
     List<List<UiNodeInfo>> searchSteps(List<UiNodeInfo> results) => [
       [
         _node(
@@ -140,6 +180,126 @@ void main() {
         top: 580,
       ),
     ];
+
+    test('media sharing selects a contact then submits the preview', () async {
+      final driver = _FakeWhatsAppDriver([
+        ...searchSteps([raihans.first]),
+        [_node(index: 4, desc: 'Send', id: 'send', clickable: true, top: 2000)],
+        [_node(index: 5, desc: 'Send', id: 'send', clickable: true, top: 2000)],
+      ]);
+      final result = await WhatsAppAutomator(
+        driver,
+        launchWaitMs: 0,
+        stepWaitMs: 0,
+        searchWaitMs: 0,
+      ).sendSharedMedia('Raihan');
+      expect(result.ok, true);
+      expect(driver.tappedIndices, [0, 2, 4, 5]);
+    });
+    test(
+      'media sharing stops before preview when recipient is ambiguous',
+      () async {
+        final driver = _FakeWhatsAppDriver(searchSteps(raihans));
+        final result = await WhatsAppAutomator(
+          driver,
+          launchWaitMs: 0,
+          stepWaitMs: 0,
+          searchWaitMs: 0,
+        ).sendSharedMedia('Raihan');
+        expect(result.ok, false);
+        expect(result.data['whatsappRecipients'], ['Raihan', 'Raihan Khan']);
+        expect(driver.tappedIndices, [0]);
+      },
+    );
+    test(
+      'locked WhatsApp voice recording is verified before sending',
+      () async {
+        final driver = _FakeWhatsAppDriver([
+          ...searchSteps([raihans.first]),
+          [
+            _node(
+              index: 3,
+              text: 'Message',
+              id: 'entry',
+              editable: true,
+              top: 2000,
+            ),
+            _node(
+              index: 4,
+              desc: 'Voice message',
+              id: 'voice_note_btn',
+              clickable: true,
+              top: 2000,
+            ),
+          ],
+          [
+            _node(
+              index: 5,
+              desc: 'Send',
+              id: 'send',
+              clickable: true,
+              top: 2000,
+            ),
+            _node(
+              index: 6,
+              desc: 'Delete voice message',
+              clickable: true,
+              top: 2000,
+            ),
+          ],
+        ]);
+        final automator = WhatsAppAutomator(
+          driver,
+          launchWaitMs: 0,
+          stepWaitMs: 0,
+          searchWaitMs: 0,
+        );
+        final started = await automator.startVoiceMessage('Raihan');
+        expect(started.ok, true);
+        expect(driver.voiceStarts, [4]);
+        final sent = await automator.finishVoiceMessage(cancel: false);
+        expect(sent.ok, true);
+        expect(driver.tappedIndices.last, 5);
+      },
+    );
+    test(
+      'finished voice note never sends an unrelated existing text draft',
+      () async {
+        final driver = _FakeWhatsAppDriver([
+          [
+            _node(
+              index: 5,
+              desc: 'Send',
+              id: 'send',
+              clickable: true,
+              top: 2000,
+            ),
+          ],
+        ]);
+        final result = await WhatsAppAutomator(
+          driver,
+        ).finishVoiceMessage(cancel: false);
+        expect(result.ok, false);
+        expect(result.data['recordingAbsent'], true);
+        expect(driver.tappedIndices, isEmpty);
+      },
+    );
+    test(
+      'does not type or send after WhatsApp leaves the foreground',
+      () async {
+        final driver = _FakeWhatsAppDriver(searchSteps([raihans.first]))
+          ..foreground = false;
+        final result = await WhatsAppAutomator(
+          driver,
+          launchWaitMs: 0,
+          stepWaitMs: 0,
+          searchWaitMs: 0,
+        ).sendMessage('Raihan', 'hi');
+        expect(result.ok, false);
+        expect(driver.typedText, isNull);
+        expect(driver.tappedIndices, isEmpty);
+      },
+    );
 
     test(
       'returns from an existing chat before searching for the recipient',

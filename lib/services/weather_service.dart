@@ -53,7 +53,9 @@ class WeatherService {
         'https://geocoding-api.open-meteo.com/v1/search?name=${Uri.encodeQueryComponent(cleanCity)}&count=1&language=en&format=json';
     final geoJson = await _httpGet(geoUrl);
     final city = parseGeocodingResponse(geoJson);
-    if (city == null) throw Exception('Could not find weather location "$cleanCity".');
+    if (city == null) {
+      throw Exception('Could not find weather location "$cleanCity".');
+    }
 
     final forecastUrl =
         'https://api.open-meteo.com/v1/forecast?latitude=${city.latitude.toStringAsFixed(4)}'
@@ -62,7 +64,9 @@ class WeatherService {
         '&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto';
     final forecastJson = await _httpGet(forecastUrl);
     final summary = formatWeatherResponse(city, forecastJson);
-    if (summary == null) throw Exception('Weather forecast unavailable for ${city.name}.');
+    if (summary == null) {
+      throw Exception('Weather forecast unavailable for ${city.name}.');
+    }
     await saveCity(city.name);
     return summary;
   }
@@ -90,7 +94,12 @@ class WeatherService {
       final lon = (first['longitude'] as num?)?.toDouble();
       if (name.isEmpty || lat == null || lon == null) return null;
       final country = (first['country'] ?? '').toString().trim();
-      return GeocodedCity(name: name, country: country, latitude: lat, longitude: lon);
+      return GeocodedCity(
+        name: name,
+        country: country,
+        latitude: lat,
+        longitude: lon,
+      );
     } catch (_) {
       return null;
     }
@@ -112,14 +121,22 @@ class WeatherService {
       final daily = root['daily'] as Map<String, dynamic>?;
       final highs = daily?['temperature_2m_max'] as List<dynamic>?;
       final lows = daily?['temperature_2m_min'] as List<dynamic>?;
-      final high = highs != null && highs.isNotEmpty ? (highs.first as num?)?.toDouble() : null;
-      final low = lows != null && lows.isNotEmpty ? (lows.first as num?)?.toDouble() : null;
+      final high = highs != null && highs.isNotEmpty
+          ? (highs.first as num?)?.toDouble()
+          : null;
+      final low = lows != null && lows.isNotEmpty
+          ? (lows.first as num?)?.toDouble()
+          : null;
 
-      final place = city.country.isNotEmpty ? '${city.name}, ${city.country}' : city.name;
+      final place = city.country.isNotEmpty
+          ? '${city.name}, ${city.country}'
+          : city.name;
       final condition = describeWmoWeatherCode(code);
       final buf = StringBuffer('$place: ${temp.round()}°C, $condition');
       if (feelsLike != null) buf.write(' (feels like ${feelsLike.round()}°C)');
-      if (high != null && low != null) buf.write(' · High ${high.round()}° / Low ${low.round()}°');
+      if (high != null && low != null) {
+        buf.write(' · High ${high.round()}° / Low ${low.round()}°');
+      }
       if (humidity != null) buf.write(' · Humidity $humidity%');
       if (wind != null) buf.write(' · Wind ${wind.round()} km/h');
       return buf.toString();

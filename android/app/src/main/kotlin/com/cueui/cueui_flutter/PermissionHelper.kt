@@ -23,6 +23,7 @@ enum class AppPermissionKind(
     SEND_SMS("SEND_SMS", "Send SMS", listOf(Manifest.permission.SEND_SMS)),
     READ_SMS("READ_SMS", "Read SMS", listOf(Manifest.permission.READ_SMS)),
     MICROPHONE("MICROPHONE", "Microphone", listOf(Manifest.permission.RECORD_AUDIO)),
+    CAMERA("CAMERA", "Camera", listOf(Manifest.permission.CAMERA)),
     POST_NOTIFICATIONS(
         "POST_NOTIFICATIONS",
         "Notifications",
@@ -58,6 +59,7 @@ object PermissionHelper {
         add(Manifest.permission.SEND_SMS)
         add(Manifest.permission.READ_SMS)
         add(Manifest.permission.RECORD_AUDIO)
+        add(Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             add(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -177,6 +179,7 @@ object PermissionHelper {
             "sendSmsGranted" to sendSms,
             "readSmsGranted" to readSms,
             "recordAudioGranted" to mic,
+            "cameraGranted" to granted(Manifest.permission.CAMERA),
             "postNotificationsGranted" to postNotif,
             "writeSettingsGranted" to writeSettings,
             "dndPolicyGranted" to dnd,

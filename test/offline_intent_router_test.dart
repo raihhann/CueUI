@@ -55,8 +55,8 @@ void main() {
       'routes camera, calendar, alarm, timer, weather, news, and web QA',
       () {
         final cam = OfflineIntentRouter.route('take a selfie')!;
-        expect(cam.single.tool, 'open_camera');
-        expect(cam.single.args['mode'], 'selfie');
+        expect(cam.single.tool, 'camera_photo');
+        expect(cam.single.args['lens'], 'front');
 
         final cal = OfflineIntentRouter.route(
           'schedule Team Sync tomorrow at 3:30 pm',

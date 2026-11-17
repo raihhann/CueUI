@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 import 'models/cue_models.dart';
 import 'orchestrator/cue_orchestrator.dart';
 import 'services/internet_search_service.dart';
+import 'services/media_service.dart';
 import 'services/nano_ai_service.dart';
 import 'services/native_bridge.dart';
+import 'services/routine_service.dart';
 import 'services/tool_dispatcher.dart';
 import 'services/weather_service.dart';
-import 'ui/cue_theme.dart';
-import 'ui/widgets/bento_home.dart';
-import 'ui/widgets/nano_ai_tab.dart';
-import 'ui/widgets/setup_tab.dart';
+import 'ui/app_theme.dart';
+import 'ui/widgets/assistant_home.dart';
+import 'ui/widgets/workspace_panels.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,322 +25,402 @@ class CueUiFlutterApp extends StatefulWidget {
     this.nanoAi,
     this.autoWarmAi = true,
   });
-
   final CueNativeApi? nativeApi;
   final NanoAiService? nanoAi;
   final bool autoWarmAi;
-
   @override
   State<CueUiFlutterApp> createState() => _CueUiFlutterAppState();
 }
 
 class _CueUiFlutterAppState extends State<CueUiFlutterApp> {
-  late final CueNativeApi _nativeApi;
-  late final NanoAiService _nanoAi;
-  late final InternetSearchService _internetSearch;
-  late final WeatherService _weatherService;
-  late final CueToolDispatcher _dispatcher;
-  late final CueOrchestrator _orchestrator;
-
-  StreamSubscription<Map<String, dynamic>>? _eventSub;
-  int _selectedSection = 0; // 0 = Home, 1 = Setup, 2 = AI
-  List<LaunchableApp> _apps = const [];
-  PermissionSnapshot _permSnapshot = const PermissionSnapshot();
-  VoiceUiState _voiceState = const VoiceUiState();
+  late final CueNativeApi native;
+  late final NanoAiService ai;
+  late final CueMediaService media;
+  late final CueRoutineService routines;
+  late final CueOrchestrator orchestrator;
+  StreamSubscription<Map<String, dynamic>>? events;
+  Timer? polling;
+  List<LaunchableApp> apps = const [];
+  PermissionSnapshot permissions = const PermissionSnapshot();
+  VoiceUiState voice = const VoiceUiState();
+  ThemeMode mode = ThemeMode.system;
+  int section = 0;
 
   @override
   void initState() {
     super.initState();
-    _nativeApi = widget.nativeApi ?? MethodChannelNativeApi();
-    _nanoAi = widget.nanoAi ?? NanoAiService(nativeApi: _nativeApi);
-    _internetSearch = InternetSearchService();
-    _weatherService = WeatherService();
-    late CueOrchestrator orchestratorRef;
-    _dispatcher = CueToolDispatcher(
-      nativeApi: _nativeApi,
-      internetSearch: _internetSearch,
-      weatherService: _weatherService,
-      confirmAction: (prompt) => orchestratorRef.requestUserConfirmation(prompt),
+    native = widget.nativeApi ?? MethodChannelNativeApi();
+    ai = widget.nanoAi ?? NanoAiService(nativeApi: native);
+    media = CueMediaService(native);
+    routines = CueRoutineService();
+    late CueOrchestrator reference;
+    final dispatcher = CueToolDispatcher(
+      nativeApi: native,
+      internetSearch: InternetSearchService(),
+      weatherService: WeatherService(),
+      media: media,
+      routines: routines,
+      confirmAction: (prompt) => reference.requestUserConfirmation(prompt),
     );
-    _orchestrator = CueOrchestrator(
-      nativeApi: _nativeApi,
-      nanoAi: _nanoAi,
-      dispatcher: _dispatcher,
+    orchestrator = CueOrchestrator(
+      nativeApi: native,
+      nanoAi: ai,
+      dispatcher: dispatcher,
     );
-    orchestratorRef = _orchestrator;
-
-    _eventSub = _nativeApi.events.listen(_handleNativeEvent);
-    unawaited(_bootstrap());
+    reference = orchestrator;
+    events = native.events.listen(handleEvent);
+    unawaited(bootstrap());
+    polling = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (media.recording['active'] == true || media.videoActive) {
+        try {
+          final state = await native.mediaCommand('state');
+          if (mounted) media.acceptResult(state);
+        } catch (_) {}
+      }
+    });
   }
 
-  Future<void> _bootstrap() async {
+  Future<void> bootstrap() async {
     await Future.wait([
-      _refreshApps(),
-      _refreshPermissions(),
-      _refreshVoiceState(),
+      refreshApps(),
+      refreshPermissions(),
+      refreshVoice(),
+      media.refresh(),
     ]);
     try {
-      await _nativeApi.maybeAutoPromptStartupPermissions();
+      await routines.load();
     } catch (_) {}
-    if (widget.autoWarmAi) {
-      unawaited(_nanoAi.autoDetectAndWarmLoad());
-    }
-  }
-
-  Future<void> _refreshApps() async {
     try {
-      final list = await _nativeApi.loadLaunchableApps();
-      if (mounted) setState(() => _apps = list);
+      final saved = await native.mediaCommand('load_preferences');
+      if (mounted) {
+        setState(
+          () => mode =
+              ThemeMode.values
+                  .where((item) => item.name == saved.data['theme'])
+                  .firstOrNull ??
+              ThemeMode.system,
+        );
+      }
+      await native.maybeAutoPromptStartupPermissions();
     } catch (_) {}
+    if (widget.autoWarmAi) unawaited(ai.autoDetectAndWarmLoad());
   }
 
-  Future<void> _refreshPermissions() async {
+  Future<void> refreshApps() async {
     try {
-      final snap = await _nativeApi.getPermissionSnapshot();
-      if (mounted) setState(() => _permSnapshot = snap);
+      final value = await native.loadLaunchableApps();
+      if (mounted) setState(() => apps = value);
     } catch (_) {}
   }
 
-  Future<void> _refreshVoiceState() async {
+  Future<void> refreshPermissions() async {
     try {
-      final vs = await _nativeApi.getVoiceState();
-      if (mounted) setState(() => _voiceState = vs);
+      final value = await native.getPermissionSnapshot();
+      if (mounted) setState(() => permissions = value);
     } catch (_) {}
   }
 
-  void _handleNativeEvent(Map<String, dynamic> event) {
+  Future<void> refreshVoice() async {
+    try {
+      final value = await native.getVoiceState();
+      if (mounted) setState(() => voice = value);
+    } catch (_) {}
+  }
+
+  void handleEvent(Map<String, dynamic> event) {
     if (!mounted) return;
-    final type = event['type']?.toString() ?? '';
-    switch (type) {
+    switch (event['type']) {
       case 'voiceState':
-        setState(() => _voiceState = VoiceUiState.fromMap(event));
-        break;
+        setState(() => voice = VoiceUiState.fromMap(event));
       case 'voiceResult':
-        final text = (event['text'] ?? '').toString().trim();
-        if (text.isNotEmpty) unawaited(_orchestrator.submitGoal(text));
-        break;
-      case 'missingPermission':
-        final key = (event['key'] ?? '').toString();
-        if (key.isNotEmpty) unawaited(_nativeApi.requestPermission(key));
-        break;
-      case 'permissionResult':
-        final key = (event['key'] ?? '').toString();
-        final granted = event['granted'] == true;
-        unawaited(_refreshPermissions());
-        unawaited(_orchestrator.notifyPermissionResult(key, granted));
-        break;
-      case 'appResumed':
-        final rawSnap = event['snapshot'];
-        if (rawSnap is Map) {
-          setState(() => _permSnapshot = PermissionSnapshot.fromMap(rawSnap));
-        } else {
-          unawaited(_refreshPermissions());
-        }
-        unawaited(_refreshApps());
-        break;
-      case 'bubbleState':
-        _orchestrator.setBubbleActive(event['active'] == true);
-        break;
       case 'submitGoal':
-        final text = (event['text'] ?? '').toString().trim();
-        if (text.isNotEmpty) unawaited(_orchestrator.submitGoal(text));
-        break;
+        final text = '${event['text'] ?? ''}'.trim();
+        if (text.isNotEmpty) {
+          unawaited(native.clearVoiceNotice());
+          unawaited(orchestrator.submitGoal(text));
+        }
+      case 'missingPermission':
+        unawaited(native.requestPermission('${event['key']}'));
+      case 'permissionResult':
+        unawaited(refreshPermissions());
+        unawaited(
+          orchestrator.notifyPermissionResult(
+            '${event['key']}',
+            event['granted'] == true,
+          ),
+        );
+      case 'appResumed':
+        unawaited(refreshApps());
+        unawaited(refreshPermissions());
+        unawaited(media.refresh());
+      case 'bubbleState':
+        orchestrator.setBubbleActive(event['active'] == true);
       case 'resolveConfirm':
-        _orchestrator.resolveConfirmation(event['approved'] == true);
-        break;
+        orchestrator.resolveConfirmation(event['approved'] == true);
+      case 'mediaUpdated':
+        unawaited(media.refresh());
+      case 'recordingState':
+        media.acceptResult(
+          ToolExecutionResult(
+            ok: true,
+            summary: 'Recording updated',
+            data: {'recording': event['recording']},
+          ),
+        );
+      case 'mediaCaptureResult':
+        final result = event['result'];
+        if (result is Map) {
+          media.acceptResult(ToolExecutionResult.fromMap(result));
+        }
     }
+  }
+
+  void changeMode(ThemeMode value) {
+    setState(() => mode = value);
+    unawaited(native.mediaCommand('save_preferences', {'theme': value.name}));
+  }
+
+  Future<void> run(PlannedToolCall call, String label) async {
+    setState(() => section = 0);
+    await orchestrator.submitTool(call, label);
   }
 
   @override
   void dispose() {
-    _eventSub?.cancel();
-    unawaited(_nanoAi.unloadModel(keepStatus: true));
-    _nanoAi.dispose();
-    _orchestrator.dispose();
+    polling?.cancel();
+    events?.cancel();
+    orchestrator.cancelActiveGoal();
+    orchestrator.dispose();
+    media.dispose();
+    routines.dispose();
+    unawaited(ai.unloadModel(keepStatus: true));
+    if (widget.nanoAi == null) ai.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'CueUI',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: CueColors.bg,
-        colorScheme: const ColorScheme.dark(
-          primary: CueColors.accentLime,
-          surface: CueColors.tile,
-          onPrimary: Color(0xFF111113),
-          onSurface: CueColors.textPrimary,
-        ),
-        useMaterial3: true,
-      ),
-      home: PopScope(
-        canPop: _selectedSection == 0,
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'CueUI',
+    debugShowCheckedModeBanner: false,
+    theme: CueAppTheme.build(Brightness.light),
+    darkTheme: CueAppTheme.build(Brightness.dark),
+    themeMode: mode,
+    home: Builder(
+      builder: (context) => PopScope(
+        canPop: section == 0,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && _selectedSection != 0) {
-            setState(() => _selectedSection = 0);
-          }
+          if (!didPop) setState(() => section = 0);
         },
         child: Scaffold(
-          resizeToAvoidBottomInset: true,
-          backgroundColor: CueColors.bg,
-          body: Stack(
-            children: [
-              const Positioned.fill(child: CustomPaint(painter: _BackdropPainter())),
-              SafeArea(
-                child: AnimatedBuilder(
-                  animation: Listenable.merge([_orchestrator, _nanoAi]),
-                  builder: (context, _) {
-                    final missingCount = _permSnapshot.coreMissing.length;
-                    final aiSnap = _nanoAi.snapshot;
-                    return Column(
-                      children: [
-                        _UtilityHeader(
-                          bubbleActive: _orchestrator.state.bubbleActive,
-                          isDefaultLauncher: _permSnapshot.isDefaultLauncher,
-                          missingCount: missingCount,
-                          aiSnap: aiSnap,
-                          selectedSection: _selectedSection,
-                          onSelectSection: (s) => setState(() => _selectedSection = s),
-                          onRequestDefaultLauncher: _nativeApi.requestDefaultLauncher,
-                          onToggleBubble: _nativeApi.toggleBubble,
-                        ),
-                        Expanded(
-                          child: switch (_selectedSection) {
-                            0 => RatioBentoHome(
-                                orchestrator: _orchestrator,
-                                aiSnapshot: aiSnap,
-                                voiceState: _voiceState,
-                                permSnapshot: _permSnapshot,
-                                apps: _apps,
-                                onLaunchPackage: _nativeApi.launchPackage,
-                                onOpenUrl: _nativeApi.openUrl,
-                                onGrantMissingPermissions: _nativeApi.grantNextMissing,
-                                onRequestPermissionKey: _nativeApi.requestPermission,
-                                onOpenSetupTab: () => setState(() => _selectedSection = 1),
-                                onOpenAiTab: () => setState(() => _selectedSection = 2),
-                                onToggleBubble: _nativeApi.toggleBubble,
-                                onMicClick: _nativeApi.startListening,
-                                onToggleTts: _nativeApi.toggleTts,
-                                onClearVoiceNotice: _nativeApi.clearVoiceNotice,
-                              ),
-                            1 => RatioSetupTab(
-                                snap: _permSnapshot,
-                                onGrantAllMissing: _nativeApi.grantNextMissing,
-                                onRequestPermissionKey: _nativeApi.requestPermission,
-                                onOpenAppDetails: _nativeApi.openAppDetailsSettings,
-                                onRequestDefaultLauncher: _nativeApi.requestDefaultLauncher,
-                              ),
-                            _ => NanoAiTab(
-                                aiService: _nanoAi,
-                                onRunFullCommand: (q) {
-                                  setState(() => _selectedSection = 0);
-                                  unawaited(_orchestrator.submitGoal(q));
-                                },
-                              ),
-                          },
-                        ),
-                      ],
-                    );
-                  },
+          appBar: AppBar(
+            title: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.blur_on_rounded,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
+                const SizedBox(width: 10),
+                const Text(
+                  'cue',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -1,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    'PHONE, IN FLOW',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      letterSpacing: 1.6,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              IconButton(
+                tooltip: mode == ThemeMode.dark
+                    ? 'Use light mode'
+                    : 'Use dark mode',
+                onPressed: () => changeMode(
+                  Theme.of(context).brightness == Brightness.dark
+                      ? ThemeMode.light
+                      : ThemeMode.dark,
+                ),
+                icon: Icon(
+                  Theme.of(context).brightness == Brightness.dark
+                      ? Icons.light_mode_outlined
+                      : Icons.dark_mode_outlined,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+          body: SafeArea(
+            top: false,
+            child: AnimatedBuilder(
+              animation: Listenable.merge([orchestrator, ai, media, routines]),
+              builder: (context, _) => Column(
+                children: [
+                  if (media.recording['active'] == true || media.videoActive)
+                    _RecordingBar(
+                      media: media,
+                      onPause: () => media.command(
+                        media.recording['paused'] == true
+                            ? 'resume_audio'
+                            : 'pause_audio',
+                      ),
+                      onStop: () => run(
+                        PlannedToolCall(
+                          tool: media.videoActive
+                              ? 'camera_video_stop'
+                              : 'record_audio_stop',
+                        ),
+                        'Stop and save recording',
+                      ),
+                    ),
+                  Expanded(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1000),
+                        child: switch (section) {
+                          0 => AssistantHome(
+                            orchestrator: orchestrator,
+                            voice: voice,
+                            media: media,
+                            onMic: native.startListening,
+                            onSpeakToggle: native.toggleTts,
+                            onOpenUrl: native.openUrl,
+                            onPermission: native.requestPermission,
+                            onCancel: () {
+                              orchestrator.cancelActiveGoal();
+                              unawaited(media.command('cancel_capture'));
+                              unawaited(media.command('cancel_transcription'));
+                            },
+                          ),
+                          1 => MediaLibrary(media: media, run: run),
+                          2 => RoutinesPanel(service: routines, run: run),
+                          3 => AppsPanel(
+                            apps: apps,
+                            launch: native.launchPackage,
+                          ),
+                          _ => SettingsPanel(
+                            permissions: permissions,
+                            ai: ai,
+                            mode: mode,
+                            onMode: changeMode,
+                            requestPermission: native.requestPermission,
+                            setLauncher: native.requestDefaultLauncher,
+                            toggleBubble: native.toggleBubble,
+                            bubbleActive: orchestrator.state.bubbleActive,
+                            grantMissing: native.grantNextMissing,
+                          ),
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: section,
+            onDestinationSelected: (value) => setState(() => section = value),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.auto_awesome_outlined),
+                selectedIcon: Icon(Icons.auto_awesome),
+                label: 'Assistant',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.folder_open_outlined),
+                selectedIcon: Icon(Icons.folder_rounded),
+                label: 'Library',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.waves_outlined),
+                selectedIcon: Icon(Icons.waves),
+                label: 'Routines',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.grid_view_outlined),
+                selectedIcon: Icon(Icons.grid_view_rounded),
+                label: 'Apps',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.tune_outlined),
+                selectedIcon: Icon(Icons.tune_rounded),
+                label: 'Settings',
               ),
             ],
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
-class _UtilityHeader extends StatelessWidget {
-  const _UtilityHeader({
-    required this.bubbleActive,
-    required this.isDefaultLauncher,
-    required this.missingCount,
-    required this.aiSnap,
-    required this.selectedSection,
-    required this.onSelectSection,
-    required this.onRequestDefaultLauncher,
-    required this.onToggleBubble,
+class _RecordingBar extends StatelessWidget {
+  const _RecordingBar({
+    required this.media,
+    required this.onPause,
+    required this.onStop,
   });
-
-  final bool bubbleActive;
-  final bool isDefaultLauncher;
-  final int missingCount;
-  final AiEngineSnapshot aiSnap;
-  final int selectedSection;
-  final void Function(int section) onSelectSection;
-  final VoidCallback onRequestDefaultLauncher;
-  final VoidCallback onToggleBubble;
-
+  final CueMediaService media;
+  final VoidCallback onPause, onStop;
   @override
   Widget build(BuildContext context) {
-    final aiDot = switch (aiSnap.status) {
-      AiModelStatus.ready => CueColors.accentGreen,
-      AiModelStatus.downloading || AiModelStatus.loading || AiModelStatus.scanning => CueColors.accentLime,
-      AiModelStatus.error => CueColors.accentRed,
-      AiModelStatus.unloaded => CueColors.textMuted,
-    };
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    final elapsed = (media.recording['elapsedMs'] as num?)?.toInt() ?? 0;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(18),
+      ),
       child: Row(
         children: [
-          SoftPillChip(
-            label: 'Home',
-            selected: selectedSection == 0,
-            onTap: () => onSelectSection(0),
+          const Icon(
+            Icons.fiber_manual_record,
+            size: 14,
+            color: Colors.redAccent,
           ),
-          const SizedBox(width: 6),
-          SoftPillChip(
-            label: missingCount > 0 ? 'Setup · $missingCount' : 'Setup',
-            selected: selectedSection == 1,
-            dotColor: missingCount > 0 ? CueColors.accentLime : CueColors.accentGreen,
-            onTap: () => onSelectSection(1),
-          ),
-          const SizedBox(width: 6),
-          SoftPillChip(
-            label: 'AI',
-            selected: selectedSection == 2,
-            dotColor: aiDot,
-            onTap: () => onSelectSection(2),
-          ),
-          const Spacer(),
-          if (!isDefaultLauncher && selectedSection == 0) ...[
-            SoftPillChip(
-              label: 'Set Home',
-              selected: false,
-              onTap: onRequestDefaultLauncher,
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              media.videoActive
+                  ? 'Recording video'
+                  : '${media.recording['paused'] == true ? 'Paused' : 'Recording audio'} · ${elapsed ~/ 60000}:${((elapsed ~/ 1000) % 60).toString().padLeft(2, '0')}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
-            const SizedBox(width: 6),
-          ],
-          SoftPillChip(
-            label: bubbleActive ? 'Bubble On' : 'Bubble',
-            selected: bubbleActive,
-            dotColor: bubbleActive ? CueColors.accentLime : CueColors.textMuted,
-            onTap: onToggleBubble,
           ),
+          if (!media.videoActive)
+            IconButton(
+              onPressed: onPause,
+              tooltip: media.recording['paused'] == true
+                  ? 'Resume recording'
+                  : 'Pause recording',
+              icon: Icon(
+                media.recording['paused'] == true
+                    ? Icons.play_arrow
+                    : Icons.pause,
+              ),
+            ),
+          TextButton(onPressed: onStop, child: const Text('Stop & save')),
         ],
       ),
     );
   }
-}
-
-class _BackdropPainter extends CustomPainter {
-  const _BackdropPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final soft = Paint()..color = CueColors.bgSculptSoft;
-    final mid = Paint()..color = CueColors.bgSculptMid;
-    canvas.drawCircle(Offset(size.width * 0.78, size.height * 0.14), size.width * 0.62, soft);
-    canvas.drawCircle(Offset(size.width * 0.22, size.height * 0.52), size.width * 0.56, mid);
-    canvas.drawCircle(Offset(size.width * 0.80, size.height * 0.86), size.width * 0.64, soft);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

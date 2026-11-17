@@ -19,7 +19,10 @@ void main() {
   </item>
 </channel></rss>''';
 
-      final items = InternetSearchService.parseRssHeadlines(sampleXml, maxItems: 4);
+      final items = InternetSearchService.parseRssHeadlines(
+        sampleXml,
+        maxItems: 4,
+      );
       expect(items.length, 2);
       expect(items[0].title, 'Breakthrough in Solid-State Batteries Announced');
       expect(items[0].source, 'Techwire');
@@ -34,7 +37,8 @@ void main() {
         'ephemeral (adjective): Lasting for a very short time.',
       );
 
-      const ddgJson = '{"Heading":"Rust","AbstractText":"Rust is a systems programming language.","AbstractURL":"https://rust-lang.org"}';
+      const ddgJson =
+          '{"Heading":"Rust","AbstractText":"Rust is a systems programming language.","AbstractURL":"https://rust-lang.org"}';
       final ddg = InternetSearchService.parseDuckDuckGoInstant(ddgJson)!;
       expect(ddg.$1, contains('systems programming language'));
       expect(ddg.$2, 'https://rust-lang.org');
@@ -48,14 +52,18 @@ void main() {
 
   group('WeatherService', () {
     test('parses Open-Meteo geocoding and forecast payloads', () {
-      const geoJson = '{"results":[{"name":"Berlin","country":"Germany","latitude":52.52,"longitude":13.405}]}';
+      const geoJson =
+          '{"results":[{"name":"Berlin","country":"Germany","latitude":52.52,"longitude":13.405}]}';
       final city = WeatherService.parseGeocodingResponse(geoJson)!;
       expect(city.name, 'Berlin');
       expect(city.country, 'Germany');
 
       const forecastJson =
           '{"current":{"temperature_2m":18.6,"apparent_temperature":17.9,"relative_humidity_2m":55,"weather_code":1,"wind_speed_10m":12.4},"daily":{"temperature_2m_max":[21.2],"temperature_2m_min":[11.0]}}';
-      final formatted = WeatherService.formatWeatherResponse(city, forecastJson)!;
+      final formatted = WeatherService.formatWeatherResponse(
+        city,
+        forecastJson,
+      )!;
       expect(formatted, contains('Berlin, Germany: 19°C, Mainly clear'));
       expect(formatted, contains('Humidity 55%'));
     });

@@ -1,4 +1,5 @@
 import '../models/cue_models.dart';
+import 'extended_intent_router.dart';
 
 class OfflineIntentRouter {
   static final _whatsappMessageFirstRe = RegExp(
@@ -186,6 +187,8 @@ class OfflineIntentRouter {
 
   static PlannedToolCall? _routeSingleClause(String clause) {
     final text = _stripPolitePrefix(clause);
+    final extended = ExtendedIntentRouter.route(text);
+    if (extended != null) return extended;
     if (text.isEmpty) return null;
     final lower = text.toLowerCase();
     final mentionsChatApp = [

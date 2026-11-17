@@ -19,6 +19,7 @@ class MainActivity : FlutterActivity() {
 
     private lateinit var deviceBridge: NativeDeviceBridge
     private lateinit var voiceBridge: VoiceBridge
+    private lateinit var mediaController: CueMediaController
     private val ioExecutor = Executors.newCachedThreadPool()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -30,6 +31,7 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         deviceBridge = NativeDeviceBridge(applicationContext)
         voiceBridge = VoiceBridge(applicationContext)
+        mediaController = CueMediaController(this)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -80,6 +82,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        mediaController.shutdown()
         voiceBridge.shutdown()
         ioExecutor.shutdownNow()
         super.onDestroy()
@@ -87,6 +90,17 @@ class MainActivity : FlutterActivity() {
 
     private fun handleMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "mediaCommand" -> {
+                val action = call.argument<String>("action").orEmpty()
+                if (action == "start_audio" || action == "start_video" || action == "transcribe") voiceBridge.stopListening()
+                val args = call.argument<Map<String, Any?>>("args") ?: emptyMap()
+                mediaController.execute(action, args) { result.success(it) }
+            }
+            "startWhatsAppVoiceNote" -> {
+                val service = CueAccessibilityService.instance
+                if (service == null) result.success(missingAccessibilityMap("record a WhatsApp voice message"))
+                else service.startWhatsAppVoiceNote(call.argument<Int>("index") ?: -1) { result.success(it) }
+            }
             "getPermissionSnapshot" -> result.success(PermissionHelper.snapshotMap(this))
             "maybeAutoPromptStartupPermissions" -> {
                 val missing = PermissionHelper.missingRuntimePermissions(this)
@@ -279,7 +293,7 @@ class MainActivity : FlutterActivity() {
                     result.success(a11y.captureUiNodes())
                 }
             }
-            "getForegroundPackage" -> result.success(CueAccessibilityService.instance?.currentPackageName ?: "")
+            "getForegroundPackage" -> result.success(CueAccessibilityService.instance?.foregroundPackage() ?: "")
             "tapElement" -> {
                 val a11y = CueAccessibilityService.instance
                 if (a11y == null) {

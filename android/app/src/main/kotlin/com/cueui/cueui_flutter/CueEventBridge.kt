@@ -9,6 +9,7 @@ import io.flutter.plugin.common.EventChannel
  * native components (FloatingBubbleService, VoiceBridge, MainActivity permission callbacks).
  */
 object CueEventBridge {
+    @Volatile var whatsAppVoiceRecording = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile

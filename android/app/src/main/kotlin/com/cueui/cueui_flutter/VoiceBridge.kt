@@ -66,6 +66,7 @@ class VoiceBridge(private val context: Context) {
     }
 
     fun speakIfEnabled(text: String) {
+        if (AudioRecorderService.instance != null || CueCameraActivity.isRecording || CueEventBridge.whatsAppVoiceRecording) return
         if (!ttsEnabled || !ttsReady || text.isBlank()) return
         tts?.speak(text.take(260), TextToSpeech.QUEUE_FLUSH, null, "cueui_${System.nanoTime()}")
     }
@@ -76,6 +77,11 @@ class VoiceBridge(private val context: Context) {
     }
 
     fun startListening() {
+        if (CueCameraActivity.isRecording || CueEventBridge.whatsAppVoiceRecording) {
+            statusNotice = "Use typed commands or recording controls while the microphone is recording."
+            pushState()
+            return
+        }
         if (!hasRecordAudioPermission()) {
             isListening = false
             statusNotice = "Grant Microphone permission to speak commands."
@@ -107,6 +113,7 @@ class VoiceBridge(private val context: Context) {
             SpeechRecognizer.createSpeechRecognizer(context)
         }
         recognizer = sr
+        runCatching { AudioRecorderService.instance?.pauseForCommand() }
 
         sr.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
@@ -132,6 +139,7 @@ class VoiceBridge(private val context: Context) {
             }
 
             override fun onError(error: Int) {
+                runCatching { AudioRecorderService.instance?.resumeAfterCommand() }
                 statusNotice = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH -> "Didn't catch that. Tap Mic to try again."
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected."
@@ -149,6 +157,7 @@ class VoiceBridge(private val context: Context) {
             }
 
             override fun onResults(results: Bundle?) {
+                runCatching { AudioRecorderService.instance?.resumeAfterCommand() }
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val transcript = matches?.firstOrNull()?.trim().orEmpty()
                 isListening = false
@@ -189,6 +198,7 @@ class VoiceBridge(private val context: Context) {
         statusNotice = "Listening..."
         pushState()
         runCatching { sr.startListening(intent) }.onFailure { err ->
+            runCatching { AudioRecorderService.instance?.resumeAfterCommand() }
             isListening = false
             statusNotice = "Could not start mic: ${err.message}"
             pushState()
@@ -197,6 +207,7 @@ class VoiceBridge(private val context: Context) {
     }
 
     fun stopListening() {
+        runCatching { AudioRecorderService.instance?.resumeAfterCommand() }
         runCatching { recognizer?.stopListening() }
         destroyRecognizer()
         isListening = false
@@ -211,6 +222,7 @@ class VoiceBridge(private val context: Context) {
     }
 
     fun shutdown() {
+        runCatching { AudioRecorderService.instance?.resumeAfterCommand() }
         destroyRecognizer()
         runCatching {
             tts?.stop()

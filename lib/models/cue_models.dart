@@ -3,12 +3,8 @@ import 'dart:typed_data';
 enum ChatRole { user, agent, tool, error }
 
 class ChatEntry {
-  ChatEntry({
-    required this.role,
-    required this.text,
-    this.sourceTag,
-    int? id,
-  }) : id = id ?? ++_nextId;
+  ChatEntry({required this.role, required this.text, this.sourceTag, int? id})
+    : id = id ?? ++_nextId;
 
   static int _nextId = 0;
 
@@ -181,6 +177,7 @@ class PermissionSnapshot {
     this.sendSmsGranted = false,
     this.readSmsGranted = false,
     this.recordAudioGranted = false,
+    this.cameraGranted = false,
     this.postNotificationsGranted = false,
     this.writeSettingsGranted = false,
     this.dndPolicyGranted = false,
@@ -197,6 +194,7 @@ class PermissionSnapshot {
   final bool sendSmsGranted;
   final bool readSmsGranted;
   final bool recordAudioGranted;
+  final bool cameraGranted;
   final bool postNotificationsGranted;
   final bool writeSettingsGranted;
   final bool dndPolicyGranted;
@@ -224,6 +222,7 @@ class PermissionSnapshot {
       sendSmsGranted: map['sendSmsGranted'] == true,
       readSmsGranted: map['readSmsGranted'] == true,
       recordAudioGranted: map['recordAudioGranted'] == true,
+      cameraGranted: map['cameraGranted'] == true,
       postNotificationsGranted: map['postNotificationsGranted'] == true,
       writeSettingsGranted: map['writeSettingsGranted'] == true,
       dndPolicyGranted: map['dndPolicyGranted'] == true,
@@ -305,7 +304,8 @@ class AiEngineSnapshot {
     this.status = AiModelStatus.unloaded,
     this.loadedModelName,
     this.loadedModelPath,
-    this.statusMessage = 'No local Nano GGUF loaded (using fast rule + web engine).',
+    this.statusMessage =
+        'No local Nano GGUF loaded (using fast rule + web engine).',
     this.downloadProgress = 0.0,
     this.downloadingId,
     this.lastInferenceMs,
@@ -339,13 +339,15 @@ class CueUiState {
     this.pendingPermissionLabel,
     this.pendingWebUrl,
     this.lastRouteBadge,
-  }) : messages = messages ??
-            [
-              ChatEntry(
-                role: ChatRole.agent,
-                text: 'Ready. Speak or type naturally for WhatsApp, YouTube, Spotify, calls, weather, news, camera, calendar, or web Q&A.',
-              ),
-            ];
+  }) : messages =
+           messages ??
+           [
+             ChatEntry(
+               role: ChatRole.agent,
+               text:
+                   'Ready when you are. Try “take a photo,” “record an idea,” or “send hi to Raihan on WhatsApp.”',
+             ),
+           ];
 
   final List<ChatEntry> messages;
   final bool isRunning;

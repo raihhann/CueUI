@@ -78,6 +78,8 @@ class CueAccessibilityService : AccessibilityService() {
         return nodes
     }
 
+    fun foregroundPackage(): String = rootInActiveWindow?.packageName?.toString().orEmpty()
+
     private fun collectNodes(node: AccessibilityNodeInfo?, out: MutableList<Map<String, Any?>>) {
         if (node == null || !node.isVisibleToUser) return
         val rect = Rect()
@@ -176,6 +178,33 @@ class CueAccessibilityService : AccessibilityService() {
         } else {
             tapElementByIndex(bestIdx, callback)
         }
+    }
+
+    fun startWhatsAppVoiceNote(index: Int, callback: (Map<String, Any?>) -> Unit) {
+        val root = activeAppRoot()
+        if (root?.packageName?.toString() !in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+            callback(mapOf("ok" to false, "summary" to "Open the WhatsApp chat before recording a voice message.")); return
+        }
+        val node = lastSnapshot.getOrNull(index)
+        if (node == null) { callback(mapOf("ok" to false, "summary" to "Voice message control is no longer visible.")); return }
+        val label = "${node["viewId"]} ${node["contentDesc"]}".lowercase()
+        if (!label.contains("voice") && !label.contains("record")) {
+            callback(mapOf("ok" to false, "summary" to "Could not identify WhatsApp's microphone control.")); return
+        }
+        val x = ((node["left"] as Number).toFloat() + (node["right"] as Number).toFloat()) / 2
+        val y = ((node["top"] as Number).toFloat() + (node["bottom"] as Number).toFloat()) / 2
+        val hold = GestureDescription.StrokeDescription(Path().apply { moveTo(x, y) }, 0, 650, true)
+        dispatchGesture(GestureDescription.Builder().addStroke(hold).build(), object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                val drag = hold.continueStroke(Path().apply { moveTo(x, y); lineTo(x, (y - 220 * resources.displayMetrics.density).coerceAtLeast(80f)) }, 0, 500, false)
+                val accepted = dispatchGesture(GestureDescription.Builder().addStroke(drag).build(), object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) { callback(mapOf("ok" to true, "summary" to "Started WhatsApp recording gesture.")) }
+                    override fun onCancelled(gestureDescription: GestureDescription?) { callback(mapOf("ok" to false, "summary" to "WhatsApp recording gesture was cancelled.")) }
+                }, null)
+                if (!accepted) callback(mapOf("ok" to false, "summary" to "Could not lock WhatsApp recording."))
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) { callback(mapOf("ok" to false, "summary" to "WhatsApp microphone gesture was cancelled.")) }
+        }, null).also { if (!it) callback(mapOf("ok" to false, "summary" to "Could not start WhatsApp recording gesture.")) }
     }
 
     private fun clickNodeMatchingBounds(

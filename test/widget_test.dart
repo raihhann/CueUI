@@ -1,4 +1,9 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:cueui_flutter/main.dart';
 import 'package:cueui_flutter/models/cue_models.dart';
 import 'package:cueui_flutter/orchestrator/cue_orchestrator.dart';
@@ -10,6 +15,21 @@ import 'package:cueui_flutter/services/weather_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _FakeNativeApi implements CueNativeApi {
+  @override
+  Future<ToolExecutionResult> mediaCommand(
+    String action, [
+    Map<String, dynamic> args = const {},
+  ]) async => const ToolExecutionResult(
+    ok: true,
+    summary: 'Media ready',
+    data: {
+      'items': [],
+      'recording': {'active': false},
+    },
+  );
+  @override
+  Future<ToolExecutionResult> startWhatsAppVoiceNote(int index) async =>
+      const ToolExecutionResult(ok: true, summary: 'Recording');
   final _events = StreamController<Map<String, dynamic>>.broadcast();
   bool contactsGranted = true;
   bool spotifyInstalled = true;
@@ -382,8 +402,204 @@ class _RecipientChoiceDispatcher extends CueToolDispatcher {
   }
 }
 
+class _MediaWorkflowDispatcher extends _RecipientChoiceDispatcher {
+  _MediaWorkflowDispatcher(super.api);
+  @override
+  Future<ToolExecutionResult> execute(
+    PlannedToolCall call, {
+    bool Function()? canContinue,
+  }) async {
+    calls.add(call);
+    if (call.tool == 'whatsapp_share_media' &&
+        call.args['selectedChat'] == null &&
+        call.args['recipient'] == 'Raihan') {
+      return ToolExecutionResult(
+        ok: false,
+        summary: 'Which Raihan?',
+        data: {
+          'whatsappRecipients': ['Raihan Ahmed', 'Raihan Khan'],
+          'recipient': 'Raihan',
+          'retryTool': call.tool,
+          'retryArgs': {...call.args, 'id': 'photo-123.jpg'},
+        },
+      );
+    }
+    return ToolExecutionResult(ok: true, summary: 'Done ${call.tool}');
+  }
+}
+
 void main() {
+  testWidgets(
+    'small screens and larger text keep navigation and settings usable',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 720));
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(() {
+        tester.binding.setSurfaceSize(null);
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+      await tester.pumpWidget(
+        CueUiFlutterApp(nativeApi: _FakeNativeApi(), autoWarmAi: false),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      for (final page in ['Library', 'Routines', 'Apps', 'Settings']) {
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NavigationBar),
+            matching: find.text(page),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: page);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+  testWidgets('light and dark assistant layouts render without overflow', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final fonts = {
+        'Roboto': 'C:/Windows/Fonts/segoeui.ttf',
+        'MaterialIcons':
+            'C:/src/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+      };
+      for (final font in fonts.entries) {
+        final file = File(font.value);
+        if (await file.exists()) {
+          final loader = FontLoader(font.key)
+            ..addFont(
+              file.readAsBytes().then((bytes) => ByteData.sublistView(bytes)),
+            );
+          await loader.load();
+        }
+      }
+    });
+    await tester.binding.setSurfaceSize(const Size(430, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final key = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: key,
+        child: CueUiFlutterApp(nativeApi: _FakeNativeApi(), autoWarmAi: false),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Future<void> capture(String name) async {
+      await tester.runAsync(() async {
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final image = await boundary.toImage(pixelRatio: 1);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        final directory = Directory('build/ui-previews')
+          ..createSync(recursive: true);
+        File(
+          '${directory.path}/$name.png',
+        ).writeAsBytesSync(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    }
+
+    await capture('cue-light');
+    await tester.tap(find.byTooltip('Use dark mode'));
+    await tester.pumpAndSettle();
+    expect(
+      Theme.of(tester.element(find.text('cue'))).brightness,
+      Brightness.dark,
+    );
+    await capture('cue-dark');
+    await tester.tap(find.text('Library'));
+    await tester.pumpAndSettle();
+    await capture('cue-library');
+    await tester.tap(find.text('Routines'));
+    await tester.pumpAndSettle();
+    await capture('cue-routines');
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await capture('cue-settings');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   group('CueOrchestrator', () {
+    test(
+      'preserves the exact attachment through recipient selection',
+      () async {
+        final api = _FakeNativeApi();
+        final dispatcher = _MediaWorkflowDispatcher(api);
+        final orch = CueOrchestrator(
+          nativeApi: api,
+          nanoAi: NanoAiService(nativeApi: api),
+          dispatcher: dispatcher,
+        );
+        await orch.submitGoal(
+          'take a photo then send this photo to Raihan on WhatsApp',
+        );
+        expect(dispatcher.calls.map((call) => call.tool), [
+          'camera_photo',
+          'whatsapp_share_media',
+        ]);
+        await orch.submitGoal('2');
+        expect(dispatcher.calls.last.tool, 'whatsapp_share_media');
+        expect(dispatcher.calls.last.args['id'], 'photo-123.jpg');
+        expect(dispatcher.calls.last.args['selectedChat'], 'Raihan Khan');
+        await orch.submitGoal('send it to him');
+        expect(dispatcher.calls.last.args['recipient'], 'Raihan Khan');
+      },
+    );
+    test(
+      'asks who a pronoun refers to when there is no recent recipient',
+      () async {
+        final api = _FakeNativeApi();
+        final dispatcher = _MediaWorkflowDispatcher(api);
+        final orch = CueOrchestrator(
+          nativeApi: api,
+          nanoAi: NanoAiService(nativeApi: api),
+          dispatcher: dispatcher,
+        );
+        await orch.submitGoal('send it to him');
+        expect(dispatcher.calls, isEmpty);
+        expect(orch.state.messages.last.text, contains('Who should receive'));
+        await orch.submitGoal('Sara');
+        expect(dispatcher.calls.last.args['recipient'], 'Sara');
+      },
+    );
+    test(
+      'edits a pending message and supports choosing the other match later',
+      () async {
+        final api = _FakeNativeApi();
+        final dispatcher = _RecipientChoiceDispatcher(api);
+        final orch = CueOrchestrator(
+          nativeApi: api,
+          nanoAi: NanoAiService(nativeApi: api),
+          dispatcher: dispatcher,
+        );
+        await orch.submitGoal('send hi to raihan on whatsapp');
+        await orch.submitGoal('change that to hello');
+        expect(dispatcher.calls, hasLength(1));
+        await orch.submitGoal('2');
+        expect(dispatcher.calls.last.args['message'], 'hello');
+        await orch.submitGoal('use the other Raihan');
+        expect(orch.state.quickChoices, ['1. Raihan Ahmed', 'Cancel']);
+        await orch.submitGoal('1');
+        expect(dispatcher.calls.last.args['selectedChat'], 'Raihan Ahmed');
+        expect(dispatcher.calls.last.args['message'], 'hello');
+      },
+    );
+    test('dictated command-shaped text stays message content', () async {
+      final api = _FakeNativeApi();
+      final dispatcher = _RecipientChoiceDispatcher(api);
+      final orch = CueOrchestrator(
+        nativeApi: api,
+        nanoAi: NanoAiService(nativeApi: api),
+        dispatcher: dispatcher,
+      );
+      await orch.submitGoal('dictate a message to Sara');
+      await orch.submitGoal('call me when free');
+      expect(dispatcher.calls.single.tool, 'whatsapp_send');
+      expect(dispatcher.calls.single.args['message'], 'call me when free');
+    });
     test(
       'identical names require a phone number and retain the message',
       () async {
@@ -591,7 +807,7 @@ void main() {
   });
 
   testWidgets(
-    'CueUiFlutterApp renders Ratio header, missing perms strip, Home & AI tab',
+    'CueUiFlutterApp renders original assistant, library, and settings',
     (tester) async {
       final api = _FakeNativeApi();
       await tester.pumpWidget(
@@ -599,17 +815,21 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Home'), findsOneWidget);
-      expect(find.text('Setup · 2'), findsOneWidget);
-      expect(find.text('AI'), findsOneWidget);
-      expect(find.text('2 permissions missing'), findsOneWidget);
-      expect(find.text('Essentials'), findsOneWidget);
-      expect(find.text('Favourites'), findsOneWidget);
-
-      await tester.tap(find.text('AI'));
+      expect(find.text('cue'), findsOneWidget);
+      expect(find.text('Assistant'), findsOneWidget);
+      expect(
+        find.text('A little less tapping.\nA lot more doing.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Library'));
       await tester.pumpAndSettle();
-      expect(find.text('Nano AI (Keep-Warm NLU)'), findsOneWidget);
-      expect(find.text('SmolLM2 360M Instruct (Nano)'), findsOneWidget);
+      expect(find.text('Your ideas, kept.'), findsOneWidget);
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Appearance'), findsOneWidget);
+      expect(find.text('Light'), findsOneWidget);
+      expect(find.text('Dark'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 }

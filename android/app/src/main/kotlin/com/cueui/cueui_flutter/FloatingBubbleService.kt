@@ -105,7 +105,7 @@ class FloatingBubbleService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pilot)
             .setContentTitle("CueUI Assistant")
-            .setContentText("Floating assistant ready (Flutter + Nano AI)")
+            .setContentText("Floating assistant ready (On-device phone controls)")
             .setContentIntent(openAppIntent)
             .addAction(0, "Stop", stopIntent)
             .setOngoing(true)
@@ -142,7 +142,7 @@ class FloatingBubbleService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#FF18181C"))
-                setStroke(dp(1) + 1, Color.parseColor("#FFDDEB3B"))
+                setStroke(dp(1) + 1, Color.parseColor("#FFBEB1FF"))
             }
             layoutParams = FrameLayout.LayoutParams(dp(52), dp(52))
         }
@@ -205,13 +205,13 @@ class FloatingBubbleService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#FF202026"))
-                setStroke(dp(1), Color.parseColor("#FFDDEB3B"))
+                setStroke(dp(1), Color.parseColor("#FFBEB1FF"))
             }
             layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(8) }
         }
         statusView = TextView(this).apply {
             text = "CueUI · Ready"
-            setTextColor(Color.parseColor("#FFDDEB3B"))
+            setTextColor(Color.parseColor("#FFBEB1FF"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
@@ -242,7 +242,7 @@ class FloatingBubbleService : Service() {
         }
 
         confirmPromptView = TextView(this).apply {
-            setTextColor(Color.parseColor("#FFDDEB3B"))
+            setTextColor(Color.parseColor("#FFBEB1FF"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
         }
         val confirmActions = LinearLayout(this).apply {
@@ -264,7 +264,7 @@ class FloatingBubbleService : Service() {
             background = GradientDrawable().apply {
                 cornerRadius = dp(14).toFloat()
                 setColor(Color.parseColor("#FF1F1F24"))
-                setStroke(1, Color.parseColor("#66DDEB3B"))
+                setStroke(1, Color.parseColor("#66BEB1FF"))
             }
             addView(confirmPromptView)
             addView(confirmActions)
@@ -317,7 +317,7 @@ class FloatingBubbleService : Service() {
             setPadding(dp(16), dp(9), dp(16), dp(9))
             background = GradientDrawable().apply {
                 cornerRadius = dp(24).toFloat()
-                setColor(Color.parseColor("#FFDDEB3B"))
+                setColor(Color.parseColor("#FFBEB1FF"))
             }
             setOnClickListener { dispatchInput() }
         }
@@ -470,13 +470,13 @@ class FloatingBubbleService : Service() {
 
     private fun quickChip(label: String, accent: Boolean = false, onClick: () -> Unit): TextView = TextView(this).apply {
         text = label
-        setTextColor(Color.parseColor(if (accent) "#FFDDEB3B" else "#FFE4E4E7"))
+        setTextColor(Color.parseColor(if (accent) "#FFBEB1FF" else "#FFE4E4E7"))
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
         setPadding(dp(11), dp(5), dp(11), dp(5))
         background = GradientDrawable().apply {
             cornerRadius = dp(16).toFloat()
             setColor(Color.parseColor(if (accent) "#FF252814" else "#FF222228"))
-            setStroke(1, Color.parseColor(if (accent) "#FFDDEB3B" else "#FF32323B"))
+            setStroke(1, Color.parseColor(if (accent) "#FFBEB1FF" else "#FF32323B"))
         }
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
