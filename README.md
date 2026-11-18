@@ -4,6 +4,29 @@
 
 Cue turns a spoken or typed intention into phone actions: capture a photo, record an idea, choose the right contact, share a file, or run a personal routine. Its original Flutter interface includes system, light, and dark appearance modes, a conversation timeline, media library, routines, app drawer, and settings.
 
+## Demo
+
+![CueUI running a phone command with local Qwen3 0.6B](docs/images/cueui-demo.gif)
+
+This demo runs **Qwen3 0.6B locally on a OnePlus Nord 3 5G**, with no cloud LLM. It took approximately **13 seconds from command submission to triggering the command**. This is the observed demo timing, not the time to complete every action; timing varies with the device and model state.
+
+### Demo hardware
+
+| Component | Demo device |
+| --- | --- |
+| Phone | OnePlus Nord 3 5G |
+| Chipset / CPU | MediaTek Dimensity 9000 |
+| GPU | Arm Mali-G710 MC10 |
+| RAM | **8 GB LPDDR5X** |
+| Storage | **128 GB UFS 3.1** |
+| Display | 6.74-inch AMOLED, 2772 × 1240, up to 120 Hz |
+| Local model | Qwen3 0.6B |
+| Observed command-trigger time | Approximately **13 seconds** |
+
+The demo used the **8 GB / 128 GB variant**, confirmed by the device owner. Hardware specifications are from [OnePlus's official Nord 3 5G specifications](https://www.oneplus.com/de/nord-3-5g/specs). The installed Android/OxygenOS version and available RAM during the demo were not recorded.
+
+## Appearance
+
 | Light | Dark |
 | --- | --- |
 | ![Cue assistant in light mode](docs/images/light.png) | ![Cue assistant in dark mode](docs/images/dark.png) |
