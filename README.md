@@ -1,8 +1,41 @@
 # CueUI
 
-**An Android launcher and on-device AI assistant with agentic phone controls.**
+**A local-first Android launcher project that turns everyday intentions into phone actions.**
 
 Cue turns a spoken or typed intention into phone actions: capture a photo, record an idea, choose the right contact, share a file, or run a personal routine. Its original Flutter interface includes system, light, and dark appearance modes, a conversation timeline, media library, routines, app drawer, and settings.
+
+**Status: working prototype under active development.** The demo shows local AI triggering a phone command; it does not establish that every feature works on every phone. The next interface milestone is a minimalist, launcher-first home screen with an on-demand command bar and compact results instead of a chatbot-style timeline. That redesign is planned, not yet implemented.
+
+## The problem
+
+A simple intention such as “send this photo to Raihan” can require opening an app, finding a file, navigating a share screen, choosing the right contact, and checking the result. Each app has its own layout and interaction rules.
+
+For someone who finds small controls, visual navigation, typing, or remembering app-specific steps difficult, those interactions can become a barrier. Depending on a remote AI service for every command also adds a network requirement and can mean sending the command to another provider for processing.
+
+## CueUI's approach
+
+Cue aims to put the intention first: **say or type what you want to do, then let the phone handle the supported steps.**
+
+- **Local command understanding:** familiar commands use deterministic rules; unfamiliar phrasing can use a small GGUF model running on the phone. There is no cloud LLM requirement for this path.
+- **Actions across apps:** native Android tools and screen-based automation connect capture, recordings, messaging, and device settings.
+- **Clarification when needed:** ask which contact the user means instead of deliberately choosing the first matching name; retain the message or attachment while the user answers.
+- **Less repeated navigation:** recent-recipient context and editable routines connect related actions.
+- **A launcher-first direction:** apps remain the home-screen focus, with commands available when needed. The current prototype UI is shown below; the simpler launcher is the next design milestone.
+
+Local processing reduces the need to send commands to a cloud model. It does **not** make messaging services, web lookups, or all speech recognition work without a network. See [internet dependency](#what-needs-an-internet-connection) and [data handling](#data-and-network-behavior).
+
+## Who could benefit?
+
+CueUI is intended for people who want fewer steps between an intention and an action, including:
+
+- **Older adults** who prefer plain-language tasks over navigating unfamiliar menus.
+- **Blind and low-vision users** who could benefit from voice input, spoken results, and fewer visually dependent steps.
+- **People with limited dexterity** who may find repeated tapping or typing difficult.
+- **Anyone seeking a simpler launcher** and shortcuts for everyday phone tasks.
+
+These are intended use cases, not validated accessibility claims. Voice input and spoken replies exist, but independent use with TalkBack, Switch Access, larger text, and assistive devices has not been established. CueUI's Accessibility service controls other apps; that alone does not make CueUI's own interface accessible. Some video and WhatsApp voice-recording actions currently require typed or on-screen controls.
+
+Testing with blind, low-vision, and older participants is a priority before describing the app as ready for those audiences. The plan includes meaningful labels, predictable focus order, reachable controls, clear spoken choices, and recoverable mistakes, following [Android's accessibility testing guidance](https://developer.android.com/guide/topics/ui/accessibility/testing).
 
 ## Demo
 
@@ -36,6 +69,8 @@ The demo used the **8 GB / 128 GB variant**, confirmed by the device owner. Hard
 Cue has bounded agentic behavior: it interprets intentions, executes tools, observes app UI, asks for missing information, remembers recent conversation context, and continues a workflow after a reply or permission grant. A command such as `take a selfie in 3 seconds then send this photo to Raihan on WhatsApp` combines capture, file tracking, app interaction, and recipient disambiguation.
 
 The architecture is **rules first, optional local AI second**. A small GGUF model maps unfamiliar phrasing to an allowlisted tool with schema-constrained JSON. Most multi-step execution and recovery are explicit application workflows. Cue is not an unrestricted autonomous agent, a general visual reasoning model, or an open-ended AI planner. No cloud LLM or API key is required.
+
+There is one application orchestrator with tools, not a collection of independently reasoning agents. The most accurate positioning today is **“a local-first AI launcher with agentic phone controls.”** If no local model is loaded, supported rule-based commands still work; they do not involve AI inference.
 
 ## Capabilities
 
@@ -160,14 +195,63 @@ Key locations:
 - `android/app/src/main/kotlin/com/cueui/cueui_flutter/`: native camera, recorder, media storage, speech, device access, Accessibility, and overlay services.
 - `test/`: routing, parsing, conversation, media state, routine failure handling, automation, and UI regression tests.
 
+## What needs an internet connection?
+
+| Feature | Current dependency |
+| --- | --- |
+| Rule-based commands and local GGUF inference | Can run without internet once the model is available locally |
+| App launching, photos, audio recording, playback, and local routine actions | Local operations; permissions, hardware, and target-app support still apply |
+| Voice commands | Uses on-device recognition when available; otherwise falls back to the installed speech service, which may use the network |
+| Saved-recording transcription | Requires a supported on-device speech engine and installed language data; initial language-data installation may need internet |
+| WhatsApp, YouTube, Spotify, and other connected apps | Command routing may be local, but the destination service retains its own network requirements |
+| Calls and SMS | Depend on the phone's carrier/service connection; local command recognition does not remove that requirement |
+| Weather, news, and web answers | Internet required; lookup queries are sent to external information services |
+| Model installation and updates | Catalog downloads require internet; existing readable GGUF files can also be discovered locally |
+
+“Local AI” describes where the intent model runs. It is not a claim that the entire phone or every workflow is offline. Android also notes that speech-recognition implementations may send audio to remote services; Cue's ordinary voice-command fallback must be considered when evaluating privacy. [Android SpeechRecognizer reference](https://developer.android.com/reference/android/speech/SpeechRecognizer)
+
 ## Data and network behavior
 
-- Captures and transcripts are stored in the app's private `files/cue_media` directory. Uninstalling the app removes them; export/share important recordings first.
-- FileProvider exposes that media directory with temporary read grants for sharing. It does not expose the rest of app storage.
-- Recordings are local files, not end-to-end encrypted by Cue. The manifest disables Android backup.
-- Routine definitions, model selection, and the last weather city are stored locally.
-- No cloud transcription service, telemetry SDK, or cloud LLM is configured in this project.
-- Weather, news, and web questions send the relevant query to the services implemented in the source. Sending media to WhatsApp explicitly hands the selected file to WhatsApp.
+The aim is to minimize unnecessary data transfers. The following describes the current code, **not a guarantee of zero data leakage or an independent security audit**.
+
+| Data or action | Current handling |
+| --- | --- |
+| Commands routed to the local model | Processed by the GGUF engine on the phone; no cloud LLM endpoint is configured |
+| Ordinary voice input | Passed to the selected Android recognition service; network/privacy behavior depends on the on-device or fallback service used |
+| Photos, videos, saved audio, and transcripts | Stored in private app files under `files/cue_media`; no automatic cloud upload is implemented |
+| Sharing a file | Gives the selected destination app temporary read access through FileProvider; WhatsApp then handles its own transmission |
+| Weather and web queries | Sends city/forecast coordinates, search terms, or question text to the relevant external service |
+| Model downloads | Requests model files from the catalog's Hugging Face URLs |
+| Conversation and notification context | Conversation entries and a limited notification buffer are held in memory; recent-recipient context resets on app restart |
+| Local settings | Routines, model selection, appearance, and the last weather city are stored locally |
+
+Important boundaries:
+
+- The current question fallback can send an unrecognized question to web lookup. A strict offline mode and explicit network-use controls are **planned**, not implemented.
+- Camera, microphone, Contacts, SMS, notification access, and Accessibility expose sensitive capabilities. Enable only the access needed for the actions you use. Feature-by-feature permission onboarding still needs improvement.
+- Current AI diagnostic logging can include command text. Logging must be reviewed and redacted before production distribution or sharing debug logs.
+- Private app storage is not application-level encrypted storage. Android backup is disabled, but that does not establish that all data is protected under every device or compromise scenario.
+- No cloud transcription service, telemetry SDK, or cloud LLM is configured in this project. That does not describe the behavior of Android speech providers, destination apps, browsers, or the operating system.
+- Uninstalling the app removes its private media. Export important files first. Broader retention, export, and clear-all controls are roadmap work.
+
+Privacy work will include a reviewed data-flow inventory, network-behavior tests, logging controls, model-download integrity checks, and a security review. See the [development roadmap](docs/ROADMAP.md).
+
+## Under development and next priorities
+
+Existing features are implemented to different levels of maturity. The items below are **planned improvements or hardening work**, not additional capabilities already delivered.
+
+| Priority | Work | Intended outcome |
+| --- | --- | --- |
+| P0 | Minimalist launcher redesign | Apps and favorites first; a button reveals the command bar; compact results instead of a conversation feed |
+| P0 | Accessibility and user testing | TalkBack/Switch Access workflows, clear labels and spoken choices, larger controls, and trials with intended users |
+| P0 | Privacy and offline controls | Explicit control over web fallback and speech-provider use, redacted diagnostics, clearer permissions and retention |
+| P0 | Messaging reliability | More robust recipient identification, fresh screen checks, consistent review of consequential actions, and recovery from changed app UI |
+| P1 | Local AI performance | Measure cold/warm latency, memory, battery use, and task success across phones; reduce the observed 13-second demo latency |
+| P1 | Speech and transcription | Broader offline-engine support, language/accent testing, clearer microphone handoff and failure recovery |
+| P1 | Camera/recorder compatibility | Real-device interruption, rotation, storage-pressure, and repeated-capture testing |
+| P1 | Agentic execution and release readiness | Better bounded planning/recovery, traceable outcomes, production signing, and repeatable integration tests |
+
+The [roadmap](docs/ROADMAP.md) defines concrete completion criteria. The [phone-testing guide](docs/DEVICE_TESTING.md) distinguishes code/test coverage from validation on real devices. The demo is one observed run on the documented OnePlus device, not a full compatibility or accessibility study.
 
 ## Validation and current limits
 
@@ -190,11 +274,14 @@ The debug APK is written to `build/app/outputs/flutter-apk/app-debug.apk`. UI sm
 
 Git is initialized on `main`. Generated build output, local Android SDK settings, credentials, signing files, model files, and personal media directories are ignored. The Android Gradle wrapper is included for reproducible checkouts.
 
-To connect a repository when ready:
+Repository: [raihhann/CueUI](https://github.com/raihhann/CueUI).
+
+To publish local changes when ready:
 
 ```sh
-git remote add origin <your-repository-url>
+git add README.md docs/
+git commit -m "Update project documentation"
 git push -u origin main
 ```
 
-No remote is configured or pushed by this setup. Choose a project license before public distribution.
+The connected remote is `origin`. Documentation edits do not automatically publish themselves; review the commit before pushing. Choose a project license before public distribution.

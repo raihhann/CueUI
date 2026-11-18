@@ -8,6 +8,14 @@ The Dart test suite uses simulated native results and screen trees. Run these ch
 2. Open Assistant, Library, Routines, Apps, and Settings in portrait and landscape. Test a small screen, a large font size, and the keyboard open.
 3. Check the floating bubble, its keyboard, recipient choices, permission links, and confirmation buttons.
 
+## Accessibility
+
+1. With TalkBack enabled, complete launcher navigation, command entry, microphone activation, recipient selection, confirmation, cancellation, and return Home without relying on sight.
+2. Verify every actionable control has an understandable name, reachable focus position, and useful state announcement. Check that temporary errors and choices are announced.
+3. Repeat key tasks with Switch Access, large text, and increased display size. Check that spoken feedback does not conflict with microphone recording.
+4. Test onboarding and permission grants, not just the already configured app. Record where a user needs help.
+5. Invite blind, low-vision, and older participants to evaluate agreed tasks with their own preferred settings. Document consented feedback and remaining barriers; do not infer accessibility from screen automation alone.
+
 ## Audio
 
 1. Start recording, speak, pause, wait, resume, speak again, then `stop and save as meeting notes`.
